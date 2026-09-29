@@ -89,6 +89,11 @@ revoke update, delete, truncate on audit_events from cbam_app;
   - `ref_tax_point_rules`, `ref_exclusion_rules`, `ref_origin_rules`, `ref_geography_rules`
   - `ref_sector_forms` (sector, code_pattern, gases, functional_unit, routes, questions jsonb, evidence_slots)
   - `ref_working_days` (jurisdiction, day, is_working_day)
+  - `ref_cds_report_layouts` (report_type, column, maps_to, required) — HMRC "Get customs data" layouts (R1-054)
+  - `ref_customs_monthly_exchange_rates` (currency, month, rate) — customs value conversion only (R1-035)
+  - `ref_eu_template_mappings` (template_version, sheet, cell_or_column, maps_to_field) (R1-055)
+  - `ref_linked_ets_jurisdictions` (jurisdiction, exemption basis) — empty until an agreement commences
+  - `ref_compliance_calendar` (period, return_due, payment_due) — seeded `pending` from the policy summary (REG-DEC-007)
   - R2/R3: `ref_gas_factors`, `ref_functional_units`, `ref_production_routes`, `ref_system_boundaries`, `ref_default_emissions`, `ref_default_methodology`, `ref_validation_rules`, `ref_verification_rules`, `ref_evidence_types`, `ref_carbon_price_schemes`, `ref_exchange_rates`, `ref_cbam_rates`, `ref_compliance_calendar`, `ref_penalty_rules`, `ref_interest_rules`, `ref_retention_rules`, `ref_payment_methods`, `ref_precursor_allocation_rules`, `ref_transition_packages`, `ref_enforcement_case_types`
 
 Exclusion constraint example:
@@ -103,7 +108,9 @@ alter table ref_cbam_commodity_codes add constraint no_overlap
 - `decisions` (tenant_id, subject_type, subject_id, rule_id, rule_version, dataset_version_ids uuid[], input_fingerprint bytea, outcome text, reason text, details jsonb, as_of date, supersedes_id)
 
 ### Customs (R1)
-- `import_batches` (tenant_id, file_sha256 unique per tenant, filename, document_id (file in Supabase Storage), acquisition_method `cds_export|data_request|manual_upload|feed`, source_owner, acquired_on, status, row_counts)
+- `import_batches` (tenant_id, file_sha256 unique per tenant, filename, document_id (file in Supabase Storage), acquisition_method `get_customs_data|cds_export|data_request|manual_upload|feed`, cds_report_type `import_item|import_header|import_tax_lines|export_item|null`, report_layout_version_id, eori, window_start, window_end, source_owner, acquired_on, status, row_counts)
+- `customs_data_coverage` (tenant_id, eori, report_type, covered_from, covered_to, batch_id) — drives the coverage calendar and gap detection (R1-054)
+- `customs_data_access` (tenant_id, eori, third_party_access_granted, granted_on, checked_on, notes) (R1-054)
 - `source_rows` (batch_id, row_number, raw jsonb, row_sha256) — immutable
 - `row_exceptions` (batch_id, row_number, field, code, message)
 - `declarations` (tenant_id, mrn, version, supersedes_id, acceptance_at, procedure_code, importer_party_id, declarant_party_id, agent_party_id, representation_type)
@@ -131,7 +138,9 @@ alter table ref_cbam_commodity_codes add constraint no_overlap
 - `evidence_source_parties` (tenant_id, party kind `installation|supply_chain_party|verifier`, name, links)
 - `magic_links` (case_id, token_hash, issued_at, expires_at, revoked_at, replaced_by_id, last_used_at)
 - `portal_sessions` (magic_link_id, case_id, expires_at)
-- `supplier_submissions` (case_id, version, supersedes_id, answers jsonb, form_definition_version, submitted_at)
+- `supplier_submissions` (case_id, version, supersedes_id, answers jsonb, answer_provenance jsonb (`SUPPLIER|EU_TEMPLATE`), form_definition_version, eu_template_document_id, submitted_at) — "not known yet" is an explicit answer state (R1-055, R1-056)
+- `portal_help_texts` (sector, question_key, language, version, body, status `draft|approved|retired`) (R1-056)
+- `supplier_questions` (case_id, question, asked_at, task_id, answer, answered_at) (R1-056)
 - `outreach_templates` (key, language, version, body, status `draft|approved|retired`, approved_by)
 - `outreach_messages` (case_id, template_version_id, contact_id, scheduled_for, sent_at, provider_message_id, status) · `email_events` (message_id, type, at, payload) · `email_suppressions` (email_hash, reason, at)
 - `documents` (tenant_id, current_version_id) · `document_versions` (document_id, version, storage_key, sha256, size, mime_detected, original_filename, uploaded_by_type/id, scan_state, supersedes_id)
@@ -142,9 +151,18 @@ alter table ref_cbam_commodity_codes add constraint no_overlap
 - `review_items` (tenant_id, kind, subject, status `open|assigned|resolved|reopened`, assignee, resolution, reason, row_version)
 - `job_failures` (job_name, idempotency_key, tenant_id, error, attempts, last_at, resolved_at)
 - `exports` (tenant_id, kind, params, status, document_id, generated_at)
+- `digest_preferences` (user_id, monthly_digest_enabled) (R1-060, backlog)
+
+### Shared installation network (R1-057 — detailed in ADR-0002)
+- `platform_installations` (no tenant_id; platform-level identity: operator identifier, name, country, address hash)
+- `installation_links` (tenant_id, installation_id → platform_installation_id, confirmed_by, confirmed_at)
+- `share_grants` (platform_installation_id, grantee_tenant_id, submission_ids, granted_by_contact, granted_at, revoked_at)
+  Tenants read shared submissions only through a view that joins active `share_grants`
+  for `app.tenant_id`; RLS tests cover every path.
 
 ### R2 / R3 (tables named now, detailed when their phase starts)
-R2: `document_extractions`, `extracted_values` (page, bbox, confidence, processor), `processors`, `emission_records`, `gas_components`, `precursor_links`, `monitoring_periods`, `verifiers`, `accreditations`, `verification_records`, `verification_gaps`, `carbon_price_evidence`, `cpr_components_evidence`, `field_lineage`, `source_watch_results`.
+R1 Live: `source_watch_results` (R2-031, moved earlier).
+R2: `document_extractions`, `extracted_values` (page, bbox, confidence, processor), `processors`, `emission_records`, `gas_components`, `precursor_links`, `monitoring_periods`, `verifiers`, `accreditations`, `verification_records`, `verification_gaps`, `carbon_price_evidence`, `cpr_components_evidence`, `field_lineage`, `ref_cbam_cpr_exchange_rates` (quarterly CBAM rates; never the monthly customs rates).
 R3: `calculations`, `calculation_operands`, `cpr_calculations`, `cpr_components`, `returns`, `return_versions`, `return_lines`, `approvals`, `submissions`, `submission_attempts`, `amendments`, `payments`, `repayment_claims`, `reimbursements`, `compliance_cases`, `case_deadlines`, `penalties`, `interest_charges`, `legal_holds`, `retention_schedules`, `connected_entities`, `closure_checklists`, `tenant_exports`.
 
 ## 5. Source activation rule (as a query)

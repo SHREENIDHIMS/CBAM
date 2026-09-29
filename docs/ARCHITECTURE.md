@@ -41,15 +41,16 @@ functions; it must never read another module's tables directly.
 |---|---|---|---|
 | `core` (not a module; `app/core/`) | config, db session, tenancy/RLS, auth, permissions, audit, clock, money/decimal types, errors, feature flags | R1-002, 023, 042–045 | R1 |
 | `organisations` | tenants, organisations, users, memberships, roles, liable person, onboarding, support access | R1-001, 036, 049, 051 | R1 |
-| `refdata` | regulatory sources, datasets, versions, activation, lookups, impact dry-run | R1-050 → R2-015, R2-020, R2-031 | R1→R2 |
+| `refdata` | regulatory sources, datasets, versions, activation, lookups, impact dry-run, source watcher | R1-050, R2-031 (Live) → R2-015, R2-020 | R1→R2 |
 | `tasks` | tasks, deadlines, escalation, working-day calendar lookups | R1-022 | R1 |
-| `imports` | batches, source rows, declarations, lines, parties, amendments, reconciliation, forecasts, currency | R1-003–006, 010, 025, 031, 034, 035, 037, 038 | R1 |
+| `imports` | batches, source rows, declarations, lines, parties, amendments, reconciliation, forecasts, currency, "Get customs data" adapter, coverage tracker | R1-003–006, 010, 025, 031, 034, 035, 037, 038, 054 | R1 |
 | `scope` | commodity scope decisions, exclusions, origin, geography, identifier checks | R1-007, 009, 011, 032, 052 | R1 |
 | `taxpoint` | tax-point state machine, special-procedure lifecycle, manual-review flags | R1-008, 027 → R3-021 | R1→R3 |
 | `threshold` | snapshots, forward/backward tests, trigger events | R1-012 | R1 |
 | `registration` | readiness pack, deadlines, service switch, status record, change control | R1-013, 014, 030, 033, 040 → R3-020, 026 | R1→R3 |
 | `suppliers` | suppliers, installations, contacts, readiness, contract responsibility, evidence-source parties, sector form definitions | R1-015, 016, 028, 029, 039 | R1 |
-| `portal` | magic links, portal sessions, form rendering/submission | R1-017, 041 | R1 |
+| `portal` | magic links, portal sessions, form rendering/submission, help, questions, EU template pre-fill | R1-017, 041, 055, 056 | R1 |
+| `network` | platform installation identity, supplier consent grants, shared submission views (ADR-0002) | R1-057 | R1 Live |
 | `outreach` | templates, translations, schedules (incl. test time-scale), sends, email events, suppression | R1-018, 046, 047, 053 | R1 |
 | `documents` | uploads, versions, scanning, signed URLs, evidence links | R1-019, 048 | R1 |
 | `review` | review queue items, assignment, resolution | R1-020 → R2-012 | R1→R2 |

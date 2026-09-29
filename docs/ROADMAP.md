@@ -33,9 +33,9 @@ Phase 0 ─► Phase 1–8 ─► Phase 9 ═► R1 PILOT ─► Phase 10 ═►
 
 | Cut | Requirement IDs |
 |---|---|
-| **Pilot** | R1-001, 002, 003, 004, 005, 006, 007, 008, 009, 010, 011, 012, 015, 016*, 017, 018, 019, 021, 022, 023, 025, 027, 028, 032, 036, 041, 042, 043, 044, 045, 046, 048, 050, 051*, 053, and the five pilot-language templates of R1-047 (*PILOT-P1: in pilot if the pilot client needs it) |
-| **Live** | R1-013, 014, 020, 024, 026, 029, 030, 031, 033, 034, 035, 037, 038, 039, 040, 047, 049 |
-| **Backlog** | R1-052 |
+| **Pilot** | R1-001, 002, 003, 004, 005, 006, 007, 008, 009, 010, 011, 012, 015, 016*, 017, 018, 019, 021, 022, 023, 025, 027, 028, 032, 036, 041, 042, 043, 044, 045, 046, 048, 050, 051*, 053, 054, 055*, 056*, and the five pilot-language templates of R1-047 (*PILOT-P1: in pilot if the pilot client needs it) |
+| **Live** | R1-013, 014, 020, 024, 026, 029, 030, 031, 033, 034, 035, 037, 038, 039, 040, 047, 049, 057, 058, and R2-031 (moved earlier) |
+| **Backlog** | R1-052, 059, 060 |
 
 R2 and R3 contents: `docs/PRD.md` §5 and `plans/IMPLEMENTATION_PLAN.md` Appendix A.
 
@@ -43,7 +43,8 @@ R2 and R3 contents: `docs/PRD.md` §5 and `plans/IMPLEMENTATION_PLAN.md` Appendi
 
 | Blocker (spec §20 + handbook §12) | Needed by | If still open |
 |---|---|---|
-| Masked real CDS export (DATA-DEC-002) | Phase 3 mapping freeze | Build against the published CDS field spec + synthetic data; freeze mapping when the sample arrives, before Pilot |
+| Real "Get customs data" reports from a pilot client, and the client's third-party access grant (DATA-DEC-002) | Phase 3 mapping freeze | Build against the published report descriptions + synthetic files; freeze mapping when real (masked) reports arrive, before Pilot |
+| Sample EU CBAM Communication Template (handbook §12) | Phase 6 (R1-055) | Portal works without it; pre-fill added when the template is available |
 | Domain owner named (GOV-DEC-009) | Phase 2 activation, Pilot UAT | Develop with fixture data; nothing activated in production |
 | Email provider/domain (OPS-DEC-012, BRAND-DEC-015) | Phase 7 real sends, Pilot | Local mail catcher; pilot cannot start outreach |
 | Brand name, portal URL (BRAND-DEC-015) | Phase 7 templates | `{brand}` placeholder; changing it after outreach means re-sending to suppliers |

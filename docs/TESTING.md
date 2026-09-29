@@ -54,6 +54,7 @@ These are written **before** the matching implementation (spec R1-012, §16, §2
 | TH-08 | Look-back crossing 1 Jan 2027 | Lines before 1 Jan 2027 excluded |
 | TH-09 | Forecast revised down after a forward trigger | New forecast version; original trigger event kept |
 | TH-10 | Excluded / out-of-scope / UK-origin-evidenced lines | Not counted |
+| TH-11 | Customs-data coverage has a gap inside the test window | Result still computed but flagged "coverage incomplete"; task created (R1-054) |
 
 ### Dates and numbers (R1-043, R1-044)
 BST/GMT boundary (31 Mar 23:30 UTC → 1 Apr UK), quarter mapping, leap day,
@@ -77,9 +78,24 @@ bounce suppresses, Day 7/14/21/28 transitions with frozen clock, Day 28 escalate
 but does **not** set default; full sequence in staging "minutes-mode" (R1-053);
 templates exist and are approved for EN, TR, ZH, HI, DE.
 
-### Import (R1-003, 025)
+### Import (R1-003, 025, 054)
 A 500-row CDS file imports cleanly with errors reported per row (handbook gate),
-then the 10,000-row load test.
+then the 10,000-row load test. "Get customs data": item + header + tax-lines reports
+join correctly; overlapping 31-day reports do not duplicate lines; a missing window
+appears as a gap; GB and XI EORIs tracked separately; changed report layout handled
+by a new `ref_cds_report_layouts` version.
+
+### Portal extras (R1-055, R1-056)
+EU template fixture pre-fills the form with `EU_TEMPLATE` provenance; unknown template
+version falls back safely; "not known yet" is stored distinctly from 0; draft resume;
+supplier question creates a task.
+
+### Research-driven rules (PRD §6.1)
+Returned Goods Relief: day 1,095 vs day 1,096 after export; missing same-state evidence
+→ not excluded. Linked-ETS list empty → no exemption; fixture activation → exemption
+with source. CPR FX uses only `cbam_cpr_exchange_rates` (a test fails if the monthly
+customs dataset is read). Compliance calendar returns the published dates exactly
+(31 May 2028, 31 Jul 2028, 29 Sep 2028, 30 Nov 2028, 28 Feb 2029).
 
 ### R2 / R3 (spec §16 list — written at their phase)
 Mixed-gas CO2e; 5-dp intensity; verified result wins over recompute; actual/default
