@@ -1,0 +1,46 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+htmlcov/
+coverage.xml
+
+# Node / frontend
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+.vite/
+
+# Supabase local
+supabase/.branches/
+supabase/.temp/
+
+# Tooling output
+.playwright-mcp/
+*.log
+
+# Office lock files
+~$*
+
+# OS / editors
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Claude Code local settings (shared settings.json is committed)
+.claude/settings.local.json
