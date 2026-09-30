@@ -80,16 +80,16 @@ and §6 below. Build phase for each ID: `plans/IMPLEMENTATION_PLAN.md` Appendix 
 
 | Module | R1 | R2 | R3 |
 |---|---|---|---|
-| Organisations, users, roles, auth | 001, 002, 036, 042, 045, 049, 051 | — | 037 |
-| Customs imports | 003, 004, 005, 006, 010, 025, 031, 034, 035, 038 | — | — |
+| Organisations, users, roles, auth | 001, 002, 036, 042, 045, 049, 051, 058 | — | 037 |
+| Customs imports | 003, 004, 005, 006, 010, 025, 031, 034, 035, 038, 054, 059 | — | — |
 | Scope, origin, geography, exclusions | 007, 009, 011, 032, 052 | — | — |
 | Tax point & special procedures | 008, 027 | — | 021 |
 | Threshold | 012, 037 | — | 024, 032 |
 | Registration | 013, 014, 030, 033, 040 | — | 020, 026 |
-| Suppliers & portal | 015, 016, 017, 028, 029, 039, 041 | 014 | — |
+| Suppliers & portal | 015, 016, 017, 028, 029, 039, 041, 055, 056, 057 | 014 | — |
 | Outreach & email | 018, 046, 047, 053 | — | — |
 | Documents & evidence | 019, 048 | 001, 012, 013, 017, 022, 026, 030 | 017 |
-| Tasks, review, dashboard, export | 020, 021, 022, 024 | 016 | — |
+| Tasks, review, dashboard, export | 020, 021, 022, 024, 060 | 016 | — |
 | Reference data & sources | 050, 043, 044 | 015, 020, 031 | 001, 022, 036 |
 | Emissions | — | 002, 003, 004, 005, 006, 007, 011, 018, 019, 021, 024, 027, 029 | 002, 003 |
 | Verification | — | 008, 025, 028 | — |
@@ -119,8 +119,31 @@ Same format as the spec. Reason for each: `docs/GAP_ANALYSIS.md` §3–§4.
 | R1-052 | Identifier checks | R1 / P2 | Validate EORI format (GB/XI + 12 digits) on entry; optionally check GB EORIs against the HMRC "Check EORI number" API. Validate that a commodity code exists on the UK tariff for the tax-point date as a warning only — CBAM scope still comes only from CBAM reference data. | Malformed EORI refused; an unknown commodity code creates a warning, not a scope decision. |
 | R1-053 | Outreach time-scale for testing | R1 / PILOT-P0 | Non-production setting `OUTREACH_TIME_SCALE_SECONDS_PER_DAY` makes the Day 0/7/14/21/28 schedule run in minutes (handbook "minutes-mode"). App refuses to start in production with any other value than a real day. | Full sequence runs end to end in staging in minutes, all sends audited; production start-up fails if changed. |
 | R2-030 | Third-party processing controls | R2 / P0 | OCR/LLM (including the Claude API named in the handbook) or any external processing of documents is off by default, enabled per tenant by a `client_admin` and approved by `platform_admin`, only for processors listed in the processor register (with DPA, region and retention). Extracted values from any automated method are never accepted without human review (R2-012). | With the tenant setting off, no document byte leaves our infrastructure (verified by network-mock test); every extraction records the processor used. |
-| R2-031 | Source change watcher | R2 / P1 | Daily job fetches each registered source URL, stores a content checksum, and creates a `regulatory_review` task when it changes. It never activates or edits reference data itself. | A changed page fixture creates one review task with old/new checksums; no reference-data row changes. |
+| R2-031 | Source change watcher | R1 Live / P1 (moved earlier, see §6.1) | Daily job fetches each registered source URL, stores a content checksum, and creates a `regulatory_review` task when it changes. It never activates or edits reference data itself. | A changed page fixture creates one review task with old/new checksums; no reference-data row changes. |
+| R1-054 | HMRC "Get customs data" import adapter and coverage tracker | R1 / PILOT-P0 | Parse the four official HMRC "Get customs data" CSV reports (import item, import header, import tax lines; export item stored but not used for CBAM) and join them by declaration into import lines, keeping every source row. Each report is linked to the EORI (GB or XI) and the date window it covers (max 31 days). A per-client coverage calendar shows which days are loaded for each EORI and highlights gaps and overlaps. On the 1st of each month an operations task asks for last month's reports. Coverage accounts for HMRC's data lag (last 2 days never available; reports up to 72 h). Whether the client has granted us third-party access in the HMRC service is recorded per client. Report layouts are versioned reference data, so a changed HMRC column layout is a data change, not a code change. | A year of fixture reports loads with no duplicates; a missing 31-day window shows as a gap and creates a task; a threshold view warns when coverage for its window is incomplete. |
+| R1-055 | EU CBAM Communication Template upload | R1 / PILOT-P1 | In the supplier portal a supplier can upload the EU Commission CBAM Communication Template (Excel) they already complete for EU customers. We read the supported template versions (mapping stored as versioned reference data), pre-fill the UK sector form, and ask the supplier to confirm or correct each value before submitting. Pre-filled values are marked `source = EU_TEMPLATE` and are never treated as UK-valid; R2-010 performs the UK-rule validation. Unknown template versions are stored as a document and fall back to manual entry. | A fixture EU template pre-fills the form; confirmed values keep their EU provenance; an unknown template version does not break the form. |
+| R1-056 | Supplier portal help and save-and-return | R1 / PILOT-P1 | Per-sector, per-question help text in the supplier's language (versioned and approved like outreach templates, R1-047); an explicit "not known yet" answer that is stored as such (never as zero or blank); an "Ask a question" button that creates an operations task linked to the case and answers back through the portal; drafts saved automatically and resumed through the same (unexpired) link. | A supplier can stop and resume without losing answers; a question creates a task visible in the case timeline; "not known yet" is distinguishable from 0 in the data. |
+| R1-057 | Shared installation network (supplier consent) | R1 / P1 (design in Phase 6, build in Live cut) | One installation that supplies several of our clients answers once. A platform-level installation identity links the same real installation across tenants (matched by operator identifier/address, confirmed by operations). The supplier explicitly grants, per importer, which submissions and documents that importer may see; grants are revocable, time-stamped and audited. A tenant sees only granted data, through a read-only link to the shared submission; it never sees other importers, volumes or prices. Design recorded as ADR-0002 and reviewed by the `security` agent before build. | Without a grant a tenant sees nothing of another tenant's case; granting shares exactly the chosen submissions; revoking stops future access and is audited; RLS tests cover the shared tables. |
+| R1-058 | Demo tenant and synthetic data | R1 / P1 | A script creates (and resets) a demo tenant with synthetic imports, suppliers, installations, cases and documents covering the main scenarios (below/above threshold, special procedure, bounced email, submitted supplier). It is blocked from running in production. Used for UAT, training and sales demos. | The reset script is idempotent; production start-up refuses it; the demo tenant contains no real data. |
+| R1-059 | CBAM exposure check (prospect report) | R1 / P2 | In a sandbox tenant, a prospect's "Get customs data" CSV produces a report: in-scope lines by sector, total value, threshold status and date, and the installations to contact first. No tax calculation. The sandbox data is deleted after a configurable period unless the prospect becomes a client. | A fixture CSV produces the report; no liability figure appears; sandbox data is deleted on schedule. |
+| R1-060 | Client monthly digest | R1 / P2 | A monthly email to each client admin: threshold position, supplier responses, missing documents and upcoming deadlines, with links into the app (no personal data of suppliers in the email body). Opt-out per user. | Digest content matches the dashboard for the same date; opted-out users receive nothing. |
 | R3-037 | Tenant data export and offboarding | R3 / P1 | A client admin can request a full export of their tenant (imports, decisions, evidence files, returns, audit events) as a signed archive with a manifest. Export is audited. After closure (R3-025), data stays under retention/legal hold rules; export does not delete anything. | Export of a fixture tenant contains every table's rows and every file with matching SHA-256s; no other tenant's data is present. |
+
+### 6.1 Clarifications to existing requirements (research update, 30 Sep 2026)
+
+These do not add scope; they make existing rows precise. Source list: `docs/GAP_ANALYSIS.md` §10.
+
+| Requirement | Clarification |
+|---|---|
+| R1-003, R1-031 | The primary data route is HMRC's "Get customs data" service (CSV, 31-day reports, 4-year history, no API). See R1-054. |
+| R1-012, R1-037 | Customs data is always at least 2 days (up to ~5 days) behind, so the forward 30-day test must use the forecast register, never "latest CDS data" alone. The threshold view shows data coverage for its window. |
+| R1-011 | Returned Goods Relief needs: original export date, re-import within 3 years of export, "same state" evidence, and the Northern Ireland Union-goods variant. Store these fields and evidence links. |
+| R1-011 (linked ETS) | The linked-ETS exemption list stays empty. UK–EU ETS linking talks began Jan 2026 and are not concluded; if an agreement commences, it is added as reference data with its source, never as code. |
+| R1-035 | Customs value in a foreign currency is converted with the customs (monthly) exchange rate from the declaration data. This dataset is **separate** from the CBAM Carbon Price Relief rates. |
+| R3-005 | CPR conversion uses the rate HMRC publishes for CBAM for the calendar quarter before the tax point. Do **not** use HMRC's monthly customs exchange rates or their API for CPR. Dataset `cbam_cpr_exchange_rates` is loaded only from the CBAM publication. |
+| R3-009, R3-012 | Return and payment deadlines (policy summary, 9 Sep 2026): 2027 period → 31 May 2028; Q1 2028 → 31 Jul 2028; Q2 → 29 Sep 2028; Q3 → 30 Nov 2028; Q4 → 28 Feb 2029. The pattern is irregular, so dates come only from `ref_compliance_calendar`; never computed. |
+| R3-017, R3-035 | Records are kept for 6 years **after the end of the accounting period the goods are attributed to** (policy summary). This is the retention anchor to confirm against the legislation. |
+| R2-031 | Moved earlier to the R1 Live cut (P1): the law is still changing (second tranche of regulations laid 9 Sep 2026; more HMRC guidance promised for autumn 2026). |
 
 ## 7. Explicit non-goals
 

@@ -160,3 +160,55 @@ the spec was built from. Every handbook point was checked against v1.4.
 | ID | Requirement | Release / Priority | What the system must do | Acceptance / evidence |
 |---|---|---|---|---|
 | R1-053 | Outreach time-scale for testing | R1 / PILOT-P0 | A non-production setting (`OUTREACH_TIME_SCALE_SECONDS_PER_DAY`) makes the Day 0/7/14/21/28 schedule run in minutes instead of days, so the full sequence can be exercised end to end. The app refuses to start in production with any value other than the real day length. | In staging the full sequence runs end to end in minutes and every send is audited; production start-up fails if the setting is changed. |
+
+## 10. Research update (30 Sep 2026)
+
+Official sources were re-checked after the handbook reconciliation. Findings and
+what changed:
+
+| # | Finding | Source | Action taken |
+|---|---|---|---|
+| F1 | Return and payment deadlines: 2027 → 31 May 2028; Q1 2028 → 31 Jul 2028; Q2 → 29 Sep 2028; Q3 → 30 Nov 2028; Q4 → 28 Feb 2029. Irregular pattern | HMRC CBAM policy summary (updated 9 Sep 2026) | REG-DEC-007 narrowed; dates seeded into `ref_compliance_calendar` for domain-owner confirmation (Phase 2); PRD §6.1 |
+| F2 | HMRC "Get customs data": free, CSV, 4 report types, ≤ 31 days per report, 4 years back, last 2 days unavailable, up to 72 h, third-party access granted by the client in the service, GB or XI EORI, no API | GOV.UK "Get customs data for import and export declarations" (updated 25 Mar 2026) | DATA-DEC-002 narrowed; new **R1-054**; forward-test clarification |
+| F3 | Records kept 6 years after the end of the accounting period the goods are attributed to | Policy summary | R3-035 anchor clarified |
+| F4 | CPR uses an HMRC-published rate for the quarter before the point of import; HMRC's existing API publishes **monthly/spot/average customs** rates | "Work out your carbon price relief" (16 Jul 2026); HMRC exchange-rate API docs | Two separate datasets; R3-005 clarified |
+| F5 | Official CPR guidance does not state that default values block relief; relief needs a Carbon Pricing Verification Form from a qualifying verifier | "What you need to work out carbon price relief" (16 Jul 2026) | REG-DEC-013 stays open with this evidence |
+| F6 | Second tranche of regulations + interest SI laid 9 Sep 2026; more guidance "in the autumn"; HMRC webinars in October 2026 | GOV.UK CBAM collection | Regulatory re-check steps added before Phase 2, Pilot and Live |
+| F7 | UK–EU ETS linking negotiations began Jan 2026, not concluded; may create mutual CBAM exemptions | ICAP; law-firm briefings | Linked-ETS list stays empty; activation scenario test added |
+| F8 | Returned Goods Relief: re-import within 3 years, same state; NI Union-goods variant | "Goods that may not contribute towards the threshold" (16 Jul 2026) | R1-011 fields clarified |
+| F9 | Default values not yet published; one global default per good; country-specific defaults revisited after 2027 | Industry briefings on the draft regulations | No change: defaults stay reference data; do not populate geography rules until defined |
+
+### 10.1 Features added from the research
+
+| ID | Feature | Release | Why |
+|---|---|---|---|
+| R1-054 | "Get customs data" importer + coverage tracker | Pilot (P0) | It is the realistic data route; a missing month would silently understate the threshold |
+| R1-055 | EU CBAM Communication Template upload + pre-fill | Pilot (P1) | Many installations already fill it for EU customers; fewer questions = faster answers |
+| R1-056 | Portal help, "not known yet", ask-a-question, save-and-return | Pilot (P1) | Protects the < 10-minute target and reduces abandoned forms |
+| R1-057 | Shared installation network with supplier consent | Design Phase 6, build Live (P1) | One answer serves several clients; the spec allowed consented sharing but never defined it |
+| R1-058 | Demo tenant + synthetic data | Live (P1) | UAT, training and pilot demos without real data |
+| R1-059 | CBAM exposure check for prospects | Backlog (P2) | Helps recruit pilot clients; no tax calculation |
+| R1-060 | Client monthly digest | Backlog (P2) | Keeps clients engaged; cheap |
+| R2-031 | Source change watcher | Moved to Live (P1) | The law is still changing before go-live |
+
+### 10.2 Considered and not added
+
+| Idea | Why not now |
+|---|---|
+| Liability estimator in R1 | Breaks the "no calculator in R1" rule; rates and defaults are not published |
+| WhatsApp/SMS reminders | New vendor and more personal data; revisit after pilot feedback |
+| Automatic feed via HMRC "Customs Declarations Information" API | Not designed for bulk history; needs software registration; revisit after DATA-DEC-002 |
+| HMRC Agent Authorisation API | Only if BUS-DEC-003 decides we act as a tax agent |
+
+### 10.3 Sources checked (30 Sep 2026)
+
+- HMRC CBAM policy summary — https://www.gov.uk/government/publications/carbon-border-adjustment-mechanism-cbam-policy-summary/carbon-border-adjustment-mechanism-cbam-policy-summary
+- Get customs data — https://www.gov.uk/guidance/get-customs-data-for-import-and-export-declarations
+- Work out your carbon price relief — https://www.gov.uk/guidance/work-out-your-carbon-price-relief
+- What you need to work out carbon price relief — https://www.gov.uk/guidance/what-you-need-to-work-out-carbon-price-relief
+- Work out the date you'll need to register — https://www.gov.uk/guidance/work-out-the-date-youll-need-to-register-for-carbon-border-adjustment-mechanism-cbam
+- Goods that may not contribute towards the threshold — https://www.gov.uk/guidance/imported-carbon-border-adjustment-cbam-goods-that-may-not-contribute-towards-the-registration-threshold
+- CBAM registration collection — https://www.gov.uk/government/collections/check-if-youll-need-to-register-for-carbon-border-adjustment-mechanism-cbam
+- HMRC exchange rates (monthly) — https://www.trade-tariff.service.gov.uk/exchange_rates/monthly ; API — https://developer.service.hmrc.gov.uk/api-documentation/docs/api/xml/Exchange%20rates%20from%20HMRC
+- HMRC Developer Hub API list — https://developer.service.hmrc.gov.uk/api-documentation/docs/api
+- UK–EU ETS linking — https://icapcarbonaction.com/en/news/eu-and-uk-commit-linking-emissions-trading-systems-landmark-cooperation-agreement

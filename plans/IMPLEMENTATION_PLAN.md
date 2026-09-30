@@ -6,7 +6,7 @@
   when every box in its **Exit gate** is ticked — not when time runs out.
 - Each step names the requirement IDs it delivers. Full text and acceptance
   criteria: `docs/spec/CBAM_Spec_v1.4.md` and `docs/PRD.md` §6 (IDs R1-042+ ,
-  R2-030+, R3-037) and `docs/GAP_ANALYSIS.md` §9.3 (R1-053).
+  R2-030+, R3-037), §6.1 (clarifications) and `docs/GAP_ANALYSIS.md` §9.3 (R1-053).
 - Work one step at a time: `/plan <ID>` → failing test → `/implement` → `/test` →
   `/review` → tick the box → `plans/CHANGELOG.md` → PR.
 - Legal dates are facts, not deadlines for this plan: CBAM starts 1 Jan 2027, so
@@ -47,19 +47,21 @@ before any business code.
 10. - [ ] Sentry wired (disabled when DSN empty) with PII scrubbing.
 11. - [ ] GitHub Actions CI per `docs/TESTING.md` §5 (Supabase CLI in CI); float-ban grep;
     `gitleaks`; pre-commit hooks for ruff/prettier/gitleaks.
-12. - [ ] Write the threshold scenario catalogue TH-01…TH-10 as **failing, skipped**
+12. - [ ] Write the threshold scenario catalogue TH-01…TH-11 as **failing, skipped**
     tests with inputs and expected outcomes in `backend/tests/scenarios/test_threshold.py`
     (spec R1-012 requires these written before implementation). The domain owner
     checks the hand calculations.
 13. - [ ] Ask the regulatory-analyst agent to re-check every source in spec §23/§30 and
-    record retrieval dates (GAP_ANALYSIS §7). Log any change.
+    `docs/GAP_ANALYSIS.md` §10.3, including HMRC's autumn 2026 guidance and the October
+    2026 webinar material, and record retrieval dates. Log any change. Repeat this
+    re-check before the Pilot and Live releases.
 14. - [ ] Review `docs/OPEN_DECISIONS.md` with the project owner; get answers where possible
     (brand BRAND-DEC-015, domain owner GOV-DEC-009, hosting OPS-DEC-010, stack TECH-DEC-011).
 
 **Exit gate**
 - [ ] `supabase start`, compose, api, worker, beat and frontend all run from `README.md` steps
 - [ ] CI green on an empty PR
-- [ ] TH-01…TH-10 exist as skipped tests with hand-checked expectations
+- [ ] TH-01…TH-11 exist as skipped tests with hand-checked expectations
 - [ ] Open decisions reviewed and statuses updated
 
 ---
@@ -123,7 +125,13 @@ clock, money, decisions, tasks.
    backward months, backward test day, 2027 look-back floor, **warning ratio 80%**),
    `ref_registration_rules`, `ref_service_state`, `ref_exclusion_rules`,
    `ref_origin_rules`, `ref_geography_rules`, `ref_tax_point_rules`,
-   `ref_working_days`, `ref_sector_forms` (schema only for now).
+   `ref_working_days`, `ref_sector_forms` (schema only for now),
+   `ref_cds_report_layouts` (column layouts of the HMRC "Get customs data" reports, R1-054),
+   `ref_customs_monthly_exchange_rates` (customs value conversion, R1-035).
+   Keep `cbam_cpr_exchange_rates` a **separate** dataset (R3 phase; PRD §6.1).
+6a. - [ ] Seed `ref_compliance_calendar` as a `pending` version from the HMRC policy summary
+   (31 May 2028; 31 Jul, 29 Sep, 30 Nov 2028; 28 Feb 2029) for domain-owner
+   confirmation (REG-DEC-007). Not activated until the legal source is confirmed.
 6. - [ ] Real CBAM commodity-code list transcribed from the HMRC source into
    `backend/refdata/cbam_commodity_codes/<version>/` by the developer, checked by the
    domain owner (handbook: "CN code list accuracy" is Jenny's).
@@ -141,10 +149,11 @@ clock, money, decisions, tasks.
 ## Phase 3 — Customs import pipeline
 
 **Goal:** CDS data in, immutable and traceable.
-**Requirements:** R1-003, R1-004, R1-005, R1-006, R1-010, R1-025, R1-036
+**Requirements:** R1-003, R1-004, R1-005, R1-006, R1-010, R1-025, R1-036, R1-054
 
-1. - [ ] Freeze the CDS column mapping from the real masked sample (DATA-DEC-002); if not
-   yet available, from the published CDS export layout + synthetic file, marked provisional.
+1. - [ ] Freeze the column mapping from real (masked) HMRC "Get customs data" reports
+   (DATA-DEC-002); if not yet available, from HMRC's published report descriptions +
+   synthetic files, marked provisional. Mapping lives in `ref_cds_report_layouts`.
 2. - [ ] `import_batches` + upload endpoint: store original file in Storage, SHA-256
    idempotency, acquisition method (R1-003).
 3. - [ ] `source_rows` (raw, immutable) + row validation → `row_exceptions` (missing/invalid
@@ -157,11 +166,17 @@ clock, money, decisions, tasks.
 7. - [ ] Manual import entry with reason; same validation and downstream fields (R1-004).
 8. - [ ] Celery job for large files with progress; replay safety test (same file twice →
    no duplicates).
+8a. - [ ] "Get customs data" adapter (R1-054): parse import item, header and tax-lines
+   reports; join by declaration; record EORI (GB/XI) and the report's date window.
+8b. - [ ] Coverage tracker (R1-054): per-client, per-EORI calendar of loaded days; gap and
+   overlap detection; monthly ops task on the 1st to fetch last month; record whether the
+   client granted us third-party access; account for the 2-day / 72-hour HMRC lag.
 9. - [ ] UI: import batch list/detail, exception report (view + CSV), import ledger with
    filters, line detail showing source row.
 
 **Exit gate**
 - [ ] **500-row CDS file imports cleanly with errors reported per row** (handbook gate)
+- [ ] A year of fixture "Get customs data" reports loads without duplicates and a missing window shows as a gap with a task
 - [ ] Replaying a file creates no duplicate business records
 - [ ] Every line links to its exact source row and file
 - [ ] Freight-forwarder-as-declarant fixture keeps importer liable
@@ -180,8 +195,9 @@ clock, money, decisions, tasks.
 3. - [ ] Origin: declared vs validated origin, evidence links, UK-origin exemption only with
    evidence; conflicts → exception (R1-032).
 4. - [ ] Exclusions as rule outcomes: private/non-business use, UK origin, Returned Goods
-   Relief (incl. NI conditions), temporary admission full relief; evidence requirement per
-   outcome (R1-011).
+   Relief (export date, re-import within 3 years, same-state evidence, NI Union-goods
+   variant), temporary admission full relief; evidence requirement per outcome; the
+   linked-ETS exemption list exists but is empty (R1-011, PRD §6.1).
 5. - [ ] Tax-point state machine: `unresolved → resolved` (normal import rule) or
    `special_procedure_pending`; no return-period assignment while unresolved (R1-008).
 6. - [ ] Special-procedure lifecycle capture: storage/free zones, inward processing, outward
@@ -203,7 +219,7 @@ clock, money, decisions, tasks.
 **Goal:** legally timed £50k tests with an earliest-date trigger.
 **Requirements:** R1-012
 
-1. - [ ] Un-skip TH-01…TH-10; implement `threshold/rules.py`: forward test (any day, 30 days
+1. - [ ] Un-skip TH-01…TH-11; implement `threshold/rules.py`: forward test (any day, 30 days
    ahead, uses forecast inputs), backward test (1st of month, prior 12 months, 2027
    floor), earliest-date combination, exclusions of out-of-scope / excluded / flagged lines.
 2. - [ ] Minimal forecast input (expected tax point + value + source) to feed the forward test
@@ -215,7 +231,8 @@ clock, money, decisions, tasks.
 5. - [ ] Warning at the configured ratio (80% fixture/default) and trigger → notifications +
    tasks; trigger moves registration profile to `registrable` with trigger date.
 6. - [ ] UI: threshold dashboard (rolling totals, both tests, warning/trigger history,
-   "why" explanation listing contributing lines).
+   "why" explanation listing contributing lines, and a warning when customs-data
+   coverage for the test window is incomplete — R1-054).
 
 **Exit gate**
 - [ ] All ten threshold scenarios pass with frozen clock (handbook: "5 hand-calculated scenarios" + extras)
@@ -227,7 +244,7 @@ clock, money, decisions, tasks.
 ## Phase 6 — Suppliers, sector-aware forms, secure portal
 
 **Goal:** a supplier can answer on a phone without an account.
-**Requirements:** R1-015, R1-016, R1-017, R1-028, R1-041, R1-051
+**Requirements:** R1-015, R1-016, R1-017, R1-028, R1-041, R1-051, R1-055, R1-056 (and design of R1-057)
 
 1. - [ ] Supplier master: suppliers, installations (1→N), contacts (personal data, lawful
    basis), installation products/routes, preferred language (R1-015).
@@ -246,12 +263,24 @@ clock, money, decisions, tasks.
    all events audited (R1-017, R1-041).
 7. - [ ] Portal UI (mobile-first): landing, sector form rendered from definition, save draft,
    upload (camera/photo friendly), submit → `supplier_submissions` version; language switch.
+7a. - [ ] Portal help and save-and-return (R1-056): per-question help text in the supplier's
+   language (versioned, approved), "not known yet" answer state, "Ask a question" →
+   operations task + reply in the portal, autosaved drafts resumed through the same link.
+7b. - [ ] EU CBAM Communication Template upload (R1-055): parse supported template versions
+   (mapping in reference data), pre-fill the sector form, supplier confirms each value,
+   provenance `EU_TEMPLATE`; unknown versions stored as a document with manual entry.
+7c. - [ ] Design the shared installation network (R1-057) as ADR-0002: platform installation
+   identity, matching and confirmation, supplier consent grants per importer, read-only
+   links, RLS model, audit. Review with the `architect` and `security` agents. Design only;
+   the build happens in Phase 10.
 8. - [ ] Accessibility pass (axe) and 4G-throttled performance check.
 
 **Exit gate**
 - [ ] Five sector fixtures each render the correct question set; no incompatible generic data collected
 - [ ] Expired/revoked/replaced links fail closed; cross-case access denied (tests)
 - [ ] Minimum form completable on a phone in < 10 minutes (script ready for real test in Phase 9)
+- [ ] A draft can be left and resumed; a supplier question creates a task
+- [ ] ADR-0002 (shared installation network) written and reviewed
 
 ---
 
@@ -284,7 +313,7 @@ clock, money, decisions, tasks.
 ## Phase 8 — Operations dashboard
 
 **Goal:** "where is client X?" answered on one screen.
-**Requirements:** R1-021 (R1-022 UI)
+**Requirements:** R1-021 (R1-022 UI), R1-058
 
 1. - [ ] Per-client dashboard: imports (by scope/tax-point state), threshold status + warning,
    registration status, outreach status per supplier, documents received/missing, upcoming
@@ -292,6 +321,8 @@ clock, money, decisions, tasks.
 2. - [ ] Portfolio view for operations: all clients with health indicators and filters.
 3. - [ ] Task list UI: my tasks, overdue, by client; assign, complete with reason.
 4. - [ ] Dashboard numbers come from the same queries as detail screens (no second calculation).
+5. - [ ] Demo tenant script (R1-058): creates/resets a tenant with synthetic data covering
+   the main scenarios; refuses to run in production. Used in Phase 9 UAT and demos.
 
 **Exit gate**
 - [ ] A pilot client's full posture visible on one screen (handbook gate)
@@ -333,7 +364,7 @@ clock, money, decisions, tasks.
 
 **Goal:** everything legally needed from 1 Jan 2027.
 **Requirements:** R1-013, R1-014, R1-020, R1-024, R1-026, R1-029, R1-030, R1-031, R1-033,
-R1-034, R1-035, R1-037, R1-038, R1-039, R1-040, R1-047 (rest), R1-049
+R1-034, R1-035, R1-037, R1-038, R1-039, R1-040, R1-047 (rest), R1-049, R1-057, R2-031
 
 1. - [ ] Registration service switch: effective-dated opening date, UI service-state messages,
    pre-registration capture continues (R1-040).
@@ -364,6 +395,10 @@ R1-034, R1-035, R1-037, R1-038, R1-039, R1-040, R1-047 (rest), R1-049
 15. - [ ] Delegated evidence source party (installation / supply-chain party / verifier) (R1-039).
 16. - [ ] Translation governance for any further languages (R1-047 remainder).
 17. - [ ] Privileged support access grants, visible to tenant (R1-049).
+17a. - [ ] Shared installation network build per ADR-0002 (R1-057); `security` agent review
+    and cross-tenant tests before release.
+17b. - [ ] Source change watcher (R2-031, moved earlier): daily checksum of registered source
+    URLs → `regulatory_review` task; never edits reference data.
 18. - [ ] Repeat load test, restore drill, security review; tag `r1-live`.
 
 **Exit gate**
@@ -448,13 +483,12 @@ R1-034, R1-035, R1-037, R1-038, R1-039, R1-040, R1-047 (rest), R1-049
 
 ## Phase 15 — R2e: Dashboards, source watcher, R2 release
 
-**Requirements:** R2-014, R2-016, R2-031
+**Requirements:** R2-014, R2-016
 
 1. - [ ] Supplier readiness dashboard: who will force defaults before the return is due (R2-014).
 2. - [ ] Compliance dashboard with **RAG** status per client: evidence completeness, default
    exposure, verification status, CPR readiness, open exceptions; reconciles to cases (R2-016).
-3. - [ ] Source change watcher: daily checksum of registered URLs → review task (R2-031).
-4. - [ ] Load/restore/security checks; tag `r2.0`.
+3. - [ ] Load/restore/security checks; tag `r2.0`.
 
 **Exit gate**
 - [ ] All R2 P0 acceptance tests pass; zero unreviewed automated values accepted
@@ -470,7 +504,8 @@ R1-034, R1-035, R1-037, R1-038, R1-039, R1-040, R1-047 (rest), R1-049
 3. - [ ] Working-day calendar + payment channel catalogue (R3-022).
 4. - [ ] Weight and rounding rules incl. fractional-kg cases and HMRC-determined weight (R3-003).
 5. - [ ] Embedded-emissions calculator with operand trace; golden fixture (formula) (R3-002).
-6. - [ ] FX: HMRC rate for the quarter before the tax point per currency, round down 2 dp (R3-005).
+6. - [ ] FX: HMRC **CBAM** rate for the quarter before the tax point per currency, round down
+   2 dp, from `cbam_cpr_exchange_rates` only — never the monthly customs rates (R3-005).
 7. - [ ] Historical replay: recompute with stored versions; unchanged after a rule change (R3-018).
 
 ## Phase 17 — R3b: CPR and net liability
@@ -545,22 +580,28 @@ R1-034, R1-035, R1-037, R1-038, R1-039, R1-040, R1-047 (rest), R1-049
 |---|---|
 | 1 | R1-001, R1-002, R1-022, R1-023, R1-042, R1-043, R1-044, R1-045 |
 | 2 | R1-050 |
-| 3 | R1-003, R1-004, R1-005, R1-006, R1-010, R1-025, R1-036 |
+| 3 | R1-003, R1-004, R1-005, R1-006, R1-010, R1-025, R1-036, R1-054 |
 | 4 | R1-007, R1-008, R1-009, R1-011, R1-027, R1-032 |
 | 5 | R1-012 |
-| 6 | R1-015, R1-016, R1-017, R1-028, R1-041, R1-051 |
+| 6 | R1-015, R1-016, R1-017, R1-028, R1-041, R1-051, R1-055, R1-056 |
 | 7 | R1-018, R1-019, R1-046, R1-048, R1-053 (+ R1-047 pilot languages) |
-| 8 | R1-021 |
-| 10 | R1-013, R1-014, R1-020, R1-024, R1-026, R1-029, R1-030, R1-031, R1-033, R1-034, R1-035, R1-037, R1-038, R1-039, R1-040, R1-047, R1-049 |
-| Backlog | R1-052 |
+| 8 | R1-021, R1-058 |
+| 10 | R1-013, R1-014, R1-020, R1-024, R1-026, R1-029, R1-030, R1-031, R1-033, R1-034, R1-035, R1-037, R1-038, R1-039, R1-040, R1-047, R1-049, R1-057, R2-031 |
+| Backlog | R1-052, R1-059, R1-060 |
 | 11 | R2-002, R2-003, R2-013, R2-015, R2-017, R2-020, R2-022, R2-026, R2-030 |
 | 12 | R2-001, R2-011, R2-012 |
 | 13 | R2-004, R2-005, R2-006, R2-007, R2-018, R2-019, R2-021, R2-024, R2-027, R2-029 |
 | 14 | R2-008, R2-009, R2-010, R2-023, R2-025, R2-028 |
-| 15 | R2-014, R2-016, R2-031 |
+| 15 | R2-014, R2-016 |
 | 16 | R3-001, R3-002, R3-003, R3-005, R3-018, R3-022, R3-036 |
 | 17 | R3-004, R3-006, R3-007 |
 | 18 | R3-008, R3-009, R3-010, R3-013, R3-014, R3-021, R3-026, R3-029 |
 | 19 | R3-011, R3-012, R3-023, R3-030 |
 | 20 | R3-016, R3-019, R3-024, R3-027, R3-028, R3-031, R3-032, R3-033, R3-034 |
 | 21 | R3-015, R3-017, R3-020, R3-025, R3-035, R3-037 |
+
+## Backlog (P2, after the Live cut or when capacity allows)
+
+- [ ] R1-052 Identifier checks (EORI format / HMRC "Check an EORI number" API; tariff validity warning)
+- [ ] R1-059 CBAM exposure check for prospects (sandbox tenant; no tax figure)
+- [ ] R1-060 Client monthly digest email

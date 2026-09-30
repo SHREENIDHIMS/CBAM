@@ -71,6 +71,8 @@ the resulting token.
 | POST | `/tenants/{t}/import-batches` | Upload CDS file (multipart) + acquisition method; idempotent on SHA-256 |
 | GET | `/tenants/{t}/import-batches` · `/{id}` | Status, counts, provenance |
 | GET | `/tenants/{t}/import-batches/{id}/exceptions` | Row-level exception report (JSON/CSV) |
+| GET | `/tenants/{t}/customs-data/coverage?eori=&from=&to=` | Coverage calendar: loaded windows, gaps, overlaps (R1-054) |
+| GET/PUT | `/tenants/{t}/customs-data/access` | Third-party access status per EORI (R1-054) |
 | GET | `/tenants/{t}/import-lines` | Ledger with filters: scope, tax-point state, quarter, supplier |
 | GET | `/tenants/{t}/import-lines/{id}` | Line detail: source row, parties, decisions, timeline |
 | POST | `/tenants/{t}/import-lines` | Manual entry (reason required) |
@@ -116,11 +118,17 @@ the resulting token.
 | PUT | `/portal/case/draft` | Save draft answers |
 | POST | `/portal/case/documents` | Upload evidence |
 | POST | `/portal/case/submit` | Submit → submission version |
+| POST | `/portal/case/eu-template` | Upload EU Communication Template → pre-filled draft for confirmation (R1-055) |
+| GET | `/portal/help?question_key=` | Help text in the case language (R1-056) |
+| POST | `/portal/case/questions` · GET `/portal/case/questions` | Ask a question / read answers (R1-056) |
 | POST | `/webhooks/email/resend` | Delivery/bounce/complaint events (Resend webhook signature verified) |
 | POST | `/tenants/{t}/documents` | Upload against supplier/installation/line/case |
 | GET | `/tenants/{t}/documents/{id}` | Metadata, versions, scan state |
 | POST | `/tenants/{t}/documents/{id}/download-url` | Short-lived signed URL (permission-checked) |
 | GET/POST | `/platform/outreach-templates` | Template versions + translation approval |
+| GET/POST | `/platform/help-texts` | Portal help text versions + approval (R1-056) |
+| POST | `/platform/demo-tenant/reset` | Recreate the demo tenant (R1-058; refused in production) |
+| GET/POST | `/portal/share-grants` · DELETE `/portal/share-grants/{id}` | Supplier grants/revokes importer access (R1-057, per ADR-0002) |
 
 ### Tasks, review, dashboard, exports (R1-020–022, 024)
 

@@ -15,17 +15,17 @@ or a reference-data change, and a line in `plans/CHANGELOG.md`.
 | ID | Question | Blocks | Owner | Workaround until closed | Status |
 |---|---|---|---|---|---|
 | REG-DEC-001 | Exact HMRC registration-service opening date (guidance says "by 1 Jan 2028") | R1-013, R1-040 | Domain owner (watch GOV.UK) | Effective-dated config `registration_service.opening_date`; pre-registration mode continues | waiting-external |
-| DATA-DEC-002 | How will each client obtain CDS import history? (no public historical API assumed) | R1-003, R1-031, pilot data | Developer + client ops + HMRC software support | Upload of CDS export files; acquisition method recorded per batch | open |
+| DATA-DEC-002 | **Narrowed:** the route is HMRC's "Get customs data" service (CSV reports, 31 days each, 4 years back, no API; client grants us third-party access in the service). Still open: confirm each pilot client will grant access, and whether any client also has broker-supplied exports | R1-003, R1-031, R1-054, pilot data | Project owner + client ops | R1-054 importer + coverage tracker; manual upload of other CDS exports | open |
 | BUS-DEC-003 | Does our company act as an HMRC-authorised tax agent? Professional liability and insurance? | R3-011 live filing | Business owner + legal | Build filing-ready export; live submission stays disabled | open |
 | TECH-DEC-004 | Final HMRC return schema/method; is HMRC's digital calculation facility mandatory? | R3-011, R3-023 | Waiting on HMRC | Adapter interface + filing-ready export; no endpoint called | waiting-external |
 | LEGAL-DEC-005 | Is there a statutory CBAM approver role (handbook says SAO)? | R3-010 policy | Tax/legal adviser (written) | Approver role configurable per tenant; SAO not mandatory | open |
 | PROD-DEC-006 | Supplier commercial terms: who pays verification, who owns evidence, response SLA, disputes | R1-029, outreach copy | Business owner | Store responsibility state per supplier case; never state commercial terms as HMRC requirements | open |
-| REG-DEC-007 | Exact return and payment due-date rules. **Handbook states the 2027 return is due 31 May 2028, then quarterly**; the spec gives no date | R3-012, R3-009, §14 reminders | Domain owner | Confirm from the official source, then load `ref_compliance_calendar`; until then deadlines show "rule pending" | open |
+| REG-DEC-007 | **Narrowed:** HMRC policy summary (9 Sep 2026) gives: 2027 → 31 May 2028; Q1 2028 → 31 Jul 2028; Q2 → 29 Sep 2028; Q3 → 30 Nov 2028; Q4 → 28 Feb 2029 (returns and payments). Still open: the legal provision these come from, and the rule for 2029 onwards | R3-012, R3-009, §14 reminders | Domain owner | Seeded as a `pending` `ref_compliance_calendar` version citing the policy summary; activated only after the domain owner confirms the legal source | open |
 | GOV-DEC-009 | Handbook names **Jenny + ops** as domain owner. Confirm Jenny signs off reference-data activation and legal interpretations, and whether a tax adviser backs her | Reference-data activation (R1-050), rule interpretations, UAT | Project owner | Development proceeds; nothing is *activated* in production without her approval | open |
 | OPS-DEC-010 | Hosting region: handbook says Supabase "EU region". Choose London (eu-west-2) or an EU region, and where the API/worker containers run | Pilot deployment, DPA | Project owner | Proposed: Supabase London + containers in a UK region; see `docs/DEPLOYMENT.md` | open |
 | TECH-DEC-011 | Confirm ADR-0001 (aligned with the handbook: FastAPI, Celery, Supabase, Resend, Sentry) against the missing tech-spec companion (DOC-DEC-014) | Phase 0 | Developer | Build with ADR-0001; change only by a new ADR | open |
 | OPS-DEC-012 | Handbook names **Resend**; confirm it and set the sending domain with SPF/DKIM/DMARC | R1-046, supplier outreach in pilot | Project owner | Local mail catcher from the Supabase CLI; Resend adapter | open |
-| REG-DEC-013 | Handbook: "defaults block CPR" (no relief on goods reported with default values). The spec does not state this. Is it law? | R3-004, R2-009 | Domain owner (legal source required) | CPR engine has a rule hook `cpr_allowed_with_default`, loaded as reference data only when a source confirms it | open |
+| REG-DEC-013 | Handbook: "defaults block CPR" (no relief on goods reported with default values). The spec does not state this, and HMRC's CPR guidance (16 Jul 2026) does not say it either; relief requires a Carbon Pricing Verification Form from a qualifying verifier. Is it law? | R3-004, R2-009 | Domain owner (legal source required) | CPR engine has a rule hook `cpr_allowed_with_default`, loaded as reference data only when a source confirms it | open |
 | DOC-DEC-014 | Obtain the handbook's companions `CBAM-Complete-Workflow.docx` and `CSorted-Platform-Technical-Specification.docx` (Parts A3, C3, D, E) | Checking our architecture and data model against the team's | Project owner | `docs/ARCHITECTURE.md` + `docs/DATABASE.md` stand; reconcile when received | open |
 | BRAND-DEC-015 | Product/brand name, email sending domain and portal URL | Outreach templates, R1-046, pilot | Project owner | Placeholder `cbam.example`; templates use a `{brand}` variable | open |
 
@@ -36,7 +36,10 @@ or a reference-data change, and a line in `plans/CHANGELOG.md`.
 | Default emissions values + methodology notices | `refdata/default_emissions/`, `refdata/default_methodology/` |
 | Quarterly CBAM sector rates | `refdata/cbam_rates/` |
 | Qualifying carbon-pricing scheme list (provisional list of 27 Aug 2026 exists) | `refdata/carbon_price_schemes/` |
-| HMRC exchange rates | `refdata/exchange_rates/` |
+| HMRC **CBAM** exchange rates for CPR (quarterly; not the monthly customs rates) | `refdata/cbam_cpr_exchange_rates/` |
+| HMRC monthly customs exchange rates (customs value conversion only) | `refdata/customs_monthly_exchange_rates/` |
+| UK–EU ETS linking agreement (if concluded and commenced) | `refdata/linked_ets_jurisdictions/` |
+| HMRC autumn 2026 CBAM guidance and October 2026 webinar material | regulatory source registry; re-check before Phase 2 |
 | Carbon Pricing Verification Form fields | R2-009 data model |
 | EU CBAM communication/template | R2-010 mapping |
 | Two example verifier packages | R2-008 fixtures |

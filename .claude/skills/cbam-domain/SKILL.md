@@ -21,7 +21,8 @@ return + approval → filing + payment → six-year evidence.
 | Sectors | aluminium, cement, fertiliser, hydrogen, iron & steel; scope from commodity code | R1-007 |
 | Threshold | £50,000. Forward: expected ≥ £50k in next 30 days, any day. Backward: ≥ £50k in prior 12 months, tested on the 1st of each month; 2027 look-back starts 1 Jan 2027. Earliest date wins | R1-012, §29.2 |
 | Registration | Service opens "by 1 Jan 2028" (configurable). Deadline 30 days from liability; 2027 liability → 31 Jan 2028 | R1-013 |
-| Accounting periods | 2027 annual; then quarterly. Handbook: 2027 return due 31 May 2028 (unconfirmed — REG-DEC-007) | §3 |
+| Accounting periods | 2027 annual; then quarterly. Policy summary (9 Sep 2026): 2027 → 31 May 2028; 2028 quarters → 31 Jul, 29 Sep, 30 Nov 2028, 28 Feb 2029. Irregular: read from `ref_compliance_calendar` only (REG-DEC-007 confirms the legal source) | §3, PRD §6.1 |
+| Customs data | HMRC "Get customs data": CSV, ≤ 31 days per report, 4 years back, last 2 days missing, no API. Data always lags; forward test uses forecasts | R1-054 |
 | Tax point | Normally when goods become (or would be) subject to import duty; if no duty, when they enter the UK. Special procedures have their own triggers | R1-008 |
 | Liable person | Importer, not declarant/broker; agents may submit but never register or become liable | R1-006, R1-036, R1-002 |
 | Emissions | Direct only from 2027 (indirect modelled, inactive). CO2e from gas components with prescribed factors; intensity 5 dp | R2-002, R2-004 |
@@ -46,3 +47,5 @@ TECH-DEC-004 HMRC filing interface. See `docs/OPEN_DECISIONS.md`.
 - Adding a `PRECURSOR` scope enum value.
 - Aggregating different consignments with the same code into one return line.
 - Using an "active" dataset whose source is still draft.
+- Using HMRC's **monthly customs** exchange rates for CPR (CPR uses the quarterly CBAM rate).
+- Treating a gap in customs-data coverage as "no imports".

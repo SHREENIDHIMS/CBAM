@@ -7,6 +7,18 @@ IDs it touches. Releases are tagged `r1-pilot`, `r1-live`, `r2.0`, `r3.0`.
 ## [Unreleased]
 
 ### Added
+- Research update (`docs/GAP_ANALYSIS.md` §10): official-source findings F1–F9 and
+  clarifications to R1-003/031, R1-011, R1-012/037, R1-035, R3-005, R3-009/012,
+  R3-017/035 (`docs/PRD.md` §6.1).
+- New requirements R1-054 ("Get customs data" importer + coverage tracker), R1-055 (EU
+  template upload), R1-056 (portal help, save-and-return), R1-057 (shared installation
+  network, design in Phase 6), R1-058 (demo tenant), R1-059 and R1-060 (backlog).
+
+### Changed
+- R2-031 source change watcher moved to the R1 Live cut.
+- Open decisions DATA-DEC-002, REG-DEC-007 and REG-DEC-013 updated with research evidence.
+
+### Earlier
 - Project set-up: `CLAUDE.md`, Claude agents/commands/skills, documentation set
   (`docs/`), implementation plan (`plans/IMPLEMENTATION_PLAN.md`).
 - Specification baseline v1.4 and Team Handbook stored under `docs/spec/` with
