@@ -35,14 +35,14 @@ before any business code.
    `pyproject.toml` with ruff (E,F,I,B,UP,S,DTZ,RUF), mypy config, pytest config.
 4. - [x] `backend/app/main.py` with `/health/live` and `/health/ready`; `app/core/config.py`
    reading env vars from `.env.example`.
-5. - [ ] `supabase init` → `supabase/config.toml`; set MFA (TOTP) on, leaked-password
+5. - [x] `supabase init` → `supabase/config.toml`; set MFA (TOTP) on, leaked-password
    protection on, min password length 12; remove `cbam` from exposed schemas.
 6. - [ ] `infra/docker-compose.yml` with Redis (and ClamAV under profile `scan`).
 7. - [ ] Alembic initialised for schema `cbam`; first migration creates schema, roles
    `cbam_owner` and `cbam_app`, and revokes `anon`/`authenticated` on `cbam`.
 8. - [ ] `frontend/`: Vite + React + TS; Tailwind + shadcn/ui; routes `ops/` and `portal/`;
    eslint, prettier, vitest, Playwright + axe; `/api` proxy to :8000.
-9. - [ ] Celery app (`app/core/jobs.py`) with one no-op task and beat entry, proving the
+9. - [x] Celery app (`app/core/jobs.py`) with one no-op task and beat entry, proving the
    worker and beat run locally.
 10. - [x] Sentry wired (disabled when DSN empty) with PII scrubbing.
 11. - [ ] GitHub Actions CI per `docs/TESTING.md` §5 (Supabase CLI in CI); float-ban grep;
@@ -61,7 +61,7 @@ before any business code.
 **Exit gate**
 - [ ] `supabase start`, compose, api, worker, beat and frontend all run from `README.md` steps
 - [ ] CI green on an empty PR
-- [x] TH-01…TH-11 exist as skipped tests with hand-checked expectations
+- [ ] TH-01…TH-11 exist as skipped tests with hand-checked expectations
 - [ ] Open decisions reviewed and statuses updated
 
 ---
