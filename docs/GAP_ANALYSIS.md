@@ -212,3 +212,30 @@ what changed:
 - HMRC exchange rates (monthly) — https://www.trade-tariff.service.gov.uk/exchange_rates/monthly ; API — https://developer.service.hmrc.gov.uk/api-documentation/docs/api/xml/Exchange%20rates%20from%20HMRC
 - HMRC Developer Hub API list — https://developer.service.hmrc.gov.uk/api-documentation/docs/api
 - UK–EU ETS linking — https://icapcarbonaction.com/en/news/eu-and-uk-commit-linking-emissions-trading-systems-landmark-cooperation-agreement
+
+## 11. Source re-check (2 Oct 2026) — INCOMPLETE
+
+Phase 0 step 13. **No primary source could be fetched** (the agent environment's egress
+proxy blocked gov.uk, legislation.gov.uk, developer.service.hmrc.gov.uk,
+trade-tariff.service.gov.uk and assets.publishing.service.gov.uk). Everything below comes from
+search-engine snippets and secondary commentary, retrieved 2026-10-02. **None of it may be
+recorded as verified or used to activate reference data.** The domain owner (or an
+allow-listed re-fetch) must read the primary text. Step 13 stays unticked.
+
+| # | Finding (unverified) | Our docs affected | Action |
+|---|---|---|---|
+| C1 | **SI 2026/830 CBAM (Transitory Provision) Regulations 2026** (made, in force 1 Jan 2027) is missing from our source lists; probable legal basis of the 31 Jan 2028 and 31 May / 31 Jul / 29 Sep 2028 dates and it changes related penalties 1 Jan 2027–30 Jun 2028 | spec §23/§30, §10.3, source registry plan | Add to source registry plan as `made`, not commenced; REG-DEC-016 |
+| C2 | Due dates may follow a general rule (last working day of the 2nd month after period end): Q3 2028 → 30 Nov and Q4 2028 → 28 Feb 2029 fit; Q1/Q2 2028 (31 Jul, 29 Sep) look like transitional overrides, not an "irregular pattern" | §10 (REG-DEC-007), PRD §6 (return dates) | Model rule + overrides + working-day calendar as reference data |
+| C3 | Amendment window of 3 years appears only in the draft force-of-law notice | spec R3-013 gives no value | REG-DEC-017; `draft` row |
+| C4 | Retention: later of record creation and end of accounting period; repayment-claim records 6 years from claim date; SI 2026/802 counts from the day after period end. PRD retention line is narrower than spec R3-035 | PRD retention row | Propose PRD correction to match spec; REG-DEC-017 |
+| C5 | Penalties: Sch 17 paras 33–39 apply FA 2008 Sch 41, FA 2021 Sch 24, FA 2007 Sch 24, FA 2021 Sch 26; spec §26 lists only two | spec §26 | Penalty reference data must not be limited to §26 |
+| C6 | Forward-test wording "meet or exceed £50,000" (guidance snippet) matches TH-01; some secondary sources say "more than" | TH-01 | Confirm against Sch 16/17 text |
+| C7 | Spec §23 names SI 2026/809 "Calculation and Carbon Price Relief"; actual title "Calculation of CBAM Rate and Determination of Carbon Price Relief Regulations 2026" | spec §23 (read-only) | Record here and in registry entry |
+| C8 | CPR exchange-rate basis: guidance snippets contradict each other (quarter before importation vs quarter of importation) | PRD CPR row | Re-verify from SI 2026/809 |
+| C9–C13 | No change: registration service "by 1 Jan 2028"; defaults and illustrative rate not yet published; no official text that defaults block CPR; no CBAM API on the Developer Hub; UK–EU ETS linking not concluded. HMRC October 2026 webinar material not found | OPEN_DECISIONS | Notes added |
+
+Scenario tests to add when the owning phases start: return due-date rule plus transitional
+override; retention day-after-period-end and repayment anchor; amendment window boundary
+(draft source must not activate before commencement); penalty dataset transitional variant;
+a `made`-but-not-commenced source must not drive a 2026 `as_of` decision.
+

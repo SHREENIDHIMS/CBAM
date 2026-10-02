@@ -27,6 +27,7 @@ IDs it touches. Releases are tagged `r1-pilot`, `r1-live`, `r2.0`, `r3.0`.
   network, design in Phase 6), R1-058 (demo tenant), R1-059 and R1-060 (backlog).
 
 ### Changed
+- Source re-check 2 Oct 2026 recorded in `docs/GAP_ANALYSIS.md` §11 (search snippets only; no primary source fetched; step 13 still open). New open decisions REG-DEC-016, REG-DEC-017; notes added to REG-DEC-001/007/013, TECH-DEC-004, LEGAL-DEC-005, GOV-DEC-009.
 - R2-031 source change watcher moved to the R1 Live cut.
 - Open decisions DATA-DEC-002, REG-DEC-007 and REG-DEC-013 updated with research evidence.
 
