@@ -7,6 +7,13 @@ IDs it touches. Releases are tagged `r1-pilot`, `r1-live`, `r2.0`, `r3.0`.
 ## [Unreleased]
 
 ### Added
+- Phase 0 backend skeleton (steps 3, 4, 10, 12; steps 6, 7, 11 written but not yet run
+  against Docker/Postgres/GitHub): `backend/` uv project, FastAPI health endpoints,
+  settings, Sentry with PII scrubbing, Celery heartbeat task, Alembic with schema/roles
+  migration, Redis compose, CI workflow, float-ban script, pre-commit config.
+- R1-012: skipped threshold scenario catalogue TH-01..TH-11 awaiting domain-owner check.
+
+### Added
 - Research update (`docs/GAP_ANALYSIS.md` §10): official-source findings F1–F9 and
   clarifications to R1-003/031, R1-011, R1-012/037, R1-035, R3-005, R3-009/012,
   R3-017/035 (`docs/PRD.md` §6.1).
