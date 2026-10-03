@@ -13,7 +13,7 @@ from app.core.db import tenant_session
 from app.core.errors import InvalidRequestError, ReasonRequiredError, RuleBlockedError
 from app.modules.refdata import service
 from app.modules.refdata.service import Actor
-from tests.integration.conftest import make_tenant, make_user
+from tests.integration.conftest import make_tenant, make_user, owner_session
 from tests.integration.test_refdata import (  # noqa: F401
     NOW,
     activate,
@@ -293,10 +293,10 @@ def test_revoking_or_disabling_a_domain_owner_removes_access(
 ) -> None:
     owner = make_owner(app_engine, admin_engine)
     assert client.get(f"{P}/datasets", headers=h(owner)).status_code == 200
-    with admin_engine.begin() as conn:
+    with owner_session(admin_engine) as conn:
         conn.execute(text("update cbam.users set status = 'disabled' where id = :u"), {"u": owner})
     assert client.get(f"{P}/datasets", headers=h(owner)).status_code == 403
-    with admin_engine.begin() as conn:
+    with owner_session(admin_engine) as conn:
         conn.execute(text("update cbam.users set status = 'active' where id = :u"), {"u": owner})
     assert client.get(f"{P}/datasets", headers=h(owner)).status_code == 200
     assert revoke(admin_engine, user_id=owner, now=NOW) is True

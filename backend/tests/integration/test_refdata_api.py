@@ -175,8 +175,9 @@ def test_bootstrap_registers_a_domain_owner_once(admin_engine: Engine) -> None:
     now = datetime(2027, 3, 1, 9, 0, tzinfo=UTC)
     assert bootstrap(admin_engine, user_id=uid, email=mail.upper(), now=now) is True
     assert bootstrap(admin_engine, user_id=uid, email=mail, now=now) is False
-    with admin_engine.connect() as conn:
-        audited = conn.execute(
+    # Platform mode, because audit_events is under forced row-level security.
+    with tenant_session(admin_engine, tenant_id=None, platform=True) as s:
+        audited = s.execute(
             text(
                 "select count(*) from cbam.audit_events where tenant_id is null"
                 " and action = 'domain_owner.registered' and object_id = :u"
