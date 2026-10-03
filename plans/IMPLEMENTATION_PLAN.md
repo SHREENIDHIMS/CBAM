@@ -37,7 +37,7 @@ before any business code.
    reading env vars from `.env.example`.
 5. - [x] `supabase init` → `supabase/config.toml`; set MFA (TOTP) on, leaked-password
    protection on, min password length 12; remove `cbam` from exposed schemas.
-6. - [ ] `infra/docker-compose.yml` with Redis (and ClamAV under profile `scan`).
+6. - [x] `infra/docker-compose.yml` with Redis (and ClamAV under profile `scan`).
 7. - [x] Alembic initialised for schema `cbam`; first migration creates schema, roles
    `cbam_owner` and `cbam_app`, and revokes `anon`/`authenticated` on `cbam`.
 8. - [x] `frontend/`: Vite + React + TS; Tailwind + shadcn/ui; routes `ops/` and `portal/`;
