@@ -5,8 +5,14 @@ from fastapi import FastAPI, Request, Response, status
 
 from app.core.config import get_settings
 from app.core.errors import install_error_handlers
-from app.core.logging import bind_context, clear_context, configure_logging
+from app.core.logging import (
+    bind_context,
+    clear_context,
+    configure_logging,
+    start_request_scope,
+)
 from app.core.observability import init_sentry
+from app.modules.identity.api import router as identity_router
 
 
 def create_app() -> FastAPI:
@@ -22,10 +28,13 @@ def create_app() -> FastAPI:
     ) -> Response:
         request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
         clear_context()
+        start_request_scope()
         bind_context(request_id=request_id)
         response = await call_next(request)
         response.headers["x-request-id"] = request_id
         return response
+
+    app.include_router(identity_router, prefix="/api/v1")
 
     @app.get("/health/live")
     def live() -> dict[str, str]:

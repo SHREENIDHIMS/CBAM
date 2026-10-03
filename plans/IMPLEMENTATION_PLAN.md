@@ -80,11 +80,11 @@ clock, money, decisions, tasks.
 4. - [x] Tables `tenants`, `organisations`, `users` (profile), `memberships`,
    `approval_roles` with RLS; RLS coverage test that fails for any tenant table without
    forced RLS (R1-001).
-5. - [ ] `core/db.py`: request-scoped transaction that sets `app.tenant_id` after the
+5. - [x] `core/db.py`: request-scoped transaction that sets `app.tenant_id` after the
    membership check; worker helper to run a job "as tenant".
-6. - [ ] `core/auth.py`: verify Supabase JWT (JWKS, expiry, audience); `aal2` required for
+6. - [x] `core/auth.py`: verify Supabase JWT (JWKS, expiry, audience); `aal2` required for
    privileged roles; recent-auth check helper for sensitive actions (R1-042).
-7. - [ ] `core/permissions.py`: roles `platform_admin`, `operations`, `client_admin`,
+7. - [x] `core/permissions.py`: roles `platform_admin`, `operations`, `client_admin`,
    `reviewer`, `approver`, `supplier`, `tax_agent`, `domain_owner`; permission map;
    `require("perm")` dependency; permission-matrix test incl. tax-agent restrictions (R1-002).
 8. - [x] `audit_events` table + append-only trigger + grants + hash chain; `core/audit.py`
@@ -101,8 +101,8 @@ clock, money, decisions, tasks.
 15. - [x] Structured logging (`structlog`) with request/tenant/user IDs, no PII.
 
 **Exit gate**
-- [ ] Automated test: a user of tenant A cannot read or write any tenant-B row via API or direct SQL as `cbam_app` (handbook "RLS proven")
-- [ ] Privileged role without MFA is refused
+- [x] Automated test: a user of tenant A cannot read or write any tenant-B row via API or direct SQL as `cbam_app` (handbook "RLS proven")
+- [x] Privileged role without MFA is refused
 - [x] Audit rows cannot be changed; chain verifies
 - [x] Concurrent approval test returns one success and one 409
 
