@@ -72,10 +72,10 @@ before any business code.
 clock, money, decisions, tasks.
 **Requirements:** R1-001, R1-002, R1-022 (engine), R1-023, R1-042, R1-043, R1-044, R1-045
 
-1. - [ ] `core/dates.py`: `uk_date()`, `quarter()`, `accounting_period()` (via reference
+1. - [x] `core/dates.py`: `uk_date()`, `quarter()`, `accounting_period()` (via reference
    data hook); property tests incl. BST/GMT boundaries (R1-043).
-2. - [ ] `core/clock.py`: `Clock` protocol, `SystemClock`, `FrozenClock`; FastAPI dependency.
-3. - [ ] `core/money.py`: Decimal context, `quantize(value, places, mode)` where mode is
+2. - [x] `core/clock.py`: `Clock` protocol, `SystemClock`, `FrozenClock`; FastAPI dependency.
+3. - [x] `core/money.py`: Decimal context, `quantize(value, places, mode)` where mode is
    required; JSON encoder that emits decimals as strings (R1-044).
 4. - [ ] Tables `tenants`, `organisations`, `users` (profile), `memberships`,
    `approval_roles` with RLS; RLS coverage test that fails for any tenant table without
@@ -91,14 +91,14 @@ clock, money, decisions, tasks.
    `record()`; nightly chain-verify task; tests: UPDATE/DELETE as `cbam_app` fail (R1-023).
 9. - [ ] `core/decisions.py` + `decisions` table: canonical-JSON fingerprint, save, lookup.
 10. - [ ] `row_version` mixin + `If-Match` handling → 409 on mismatch (R1-045).
-11. - [ ] `core/errors.py`: problem+json handler, domain error types.
+11. - [x] `core/errors.py`: problem+json handler, domain error types.
 12. - [ ] `tasks` module: task model, owner, due date + `due_rule`, status machine,
     escalation history; API list/patch (R1-022 engine; UI later).
 13. - [ ] Frontend: Supabase Auth sign-in, MFA enrolment + challenge, sign-out, password
     reset; app shell; `/me`; role-aware navigation; British English formatting helpers
     (`14 March 2027`, `£1,234.56`) with tests.
 14. - [ ] Platform admin screens: create tenant, invite users, assign roles (R1-001).
-15. - [ ] Structured logging (`structlog`) with request/tenant/user IDs, no PII.
+15. - [x] Structured logging (`structlog`) with request/tenant/user IDs, no PII.
 
 **Exit gate**
 - [ ] Automated test: a user of tenant A cannot read or write any tenant-B row via API or direct SQL as `cbam_app` (handbook "RLS proven")

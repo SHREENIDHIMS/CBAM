@@ -7,6 +7,7 @@ IDs it touches. Releases are tagged `r1-pilot`, `r1-live`, `r2.0`, `r3.0`.
 ## [Unreleased]
 
 ### Added
+- Phase 1 steps 1, 2, 3, 11, 15 (R1-043, R1-044): `core/dates.py` (UK dates, quarters, data-driven accounting periods), `core/clock.py`, `core/money.py` (Decimal, mandatory rounding mode, decimals as JSON strings), `core/errors.py` (problem+json), `core/logging.py` (structlog, PII scrubbing, request IDs). Tenant and user IDs are bound to logs when auth lands (steps 5, 6).
 - Phase 0 backend skeleton (steps 3, 4, 10, 12; steps 6, 7, 11 written but not yet run
   against Docker/Postgres/GitHub): `backend/` uv project, FastAPI health endpoints,
   settings, Sentry with PII scrubbing, Celery heartbeat task, Alembic with schema/roles
