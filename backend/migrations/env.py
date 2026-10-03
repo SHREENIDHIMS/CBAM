@@ -29,15 +29,15 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     engine = create_engine(_url(), poolclass=pool.NullPool)
-    with engine.connect() as connection:
+    with engine.begin() as connection:
+        # The version table lives in cbam, so the schema must exist before Alembic starts.
         connection.exec_driver_sql("create schema if not exists cbam")
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
             version_table_schema="cbam",
         )
-        with context.begin_transaction():
-            context.run_migrations()
+        context.run_migrations()
 
 
 if context.is_offline_mode():

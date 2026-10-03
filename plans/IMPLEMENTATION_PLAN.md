@@ -38,7 +38,7 @@ before any business code.
 5. - [x] `supabase init` → `supabase/config.toml`; set MFA (TOTP) on, leaked-password
    protection on, min password length 12; remove `cbam` from exposed schemas.
 6. - [ ] `infra/docker-compose.yml` with Redis (and ClamAV under profile `scan`).
-7. - [ ] Alembic initialised for schema `cbam`; first migration creates schema, roles
+7. - [x] Alembic initialised for schema `cbam`; first migration creates schema, roles
    `cbam_owner` and `cbam_app`, and revokes `anon`/`authenticated` on `cbam`.
 8. - [ ] `frontend/`: Vite + React + TS; Tailwind + shadcn/ui; routes `ops/` and `portal/`;
    eslint, prettier, vitest, Playwright + axe; `/api` proxy to :8000.
@@ -75,9 +75,9 @@ clock, money, decisions, tasks.
 1. - [ ] `core/dates.py`: `uk_date()`, `quarter()`, `accounting_period()` (via reference
    data hook); property tests incl. BST/GMT boundaries (R1-043).
 2. - [ ] `core/clock.py`: `Clock` protocol, `SystemClock`, `FrozenClock`; FastAPI dependency.
-3. - [x] `core/money.py`: Decimal context, `quantize(value, places, mode)` where mode is
+3. - [ ] `core/money.py`: Decimal context, `quantize(value, places, mode)` where mode is
    required; JSON encoder that emits decimals as strings (R1-044).
-4. - [x] Tables `tenants`, `organisations`, `users` (profile), `memberships`,
+4. - [ ] Tables `tenants`, `organisations`, `users` (profile), `memberships`,
    `approval_roles` with RLS; RLS coverage test that fails for any tenant table without
    forced RLS (R1-001).
 5. - [ ] `core/db.py`: request-scoped transaction that sets `app.tenant_id` after the
@@ -90,9 +90,9 @@ clock, money, decisions, tasks.
 8. - [ ] `audit_events` table + append-only trigger + grants + hash chain; `core/audit.py`
    `record()`; nightly chain-verify task; tests: UPDATE/DELETE as `cbam_app` fail (R1-023).
 9. - [ ] `core/decisions.py` + `decisions` table: canonical-JSON fingerprint, save, lookup.
-10. - [x] `row_version` mixin + `If-Match` handling → 409 on mismatch (R1-045).
+10. - [ ] `row_version` mixin + `If-Match` handling → 409 on mismatch (R1-045).
 11. - [ ] `core/errors.py`: problem+json handler, domain error types.
-12. - [x] `tasks` module: task model, owner, due date + `due_rule`, status machine,
+12. - [ ] `tasks` module: task model, owner, due date + `due_rule`, status machine,
     escalation history; API list/patch (R1-022 engine; UI later).
 13. - [ ] Frontend: Supabase Auth sign-in, MFA enrolment + challenge, sign-out, password
     reset; app shell; `/me`; role-aware navigation; British English formatting helpers
@@ -116,9 +116,9 @@ clock, money, decisions, tasks.
 1. - [ ] Tables `regulatory_sources`, `ref_datasets`, `ref_dataset_versions` (`docs/DATABASE.md` §4).
 2. - [ ] Loader CLI `app.modules.refdata.load`: manifest schema validation, checksum,
    idempotency, "same version different checksum" refusal.
-3. - [x] Activation workflow: dry-run impact report → `domain_owner` approval (recent MFA)
+3. - [ ] Activation workflow: dry-run impact report → `domain_owner` approval (recent MFA)
    → `active`; audit; previous version `retired` without deleting.
-4. - [x] `v_active_<dataset>` view pattern implementing the source activation rule
+4. - [ ] `v_active_<dataset>` view pattern implementing the source activation rule
    (`docs/DATABASE.md` §5); generic `get(dataset, key, on=date)` service.
 5. - [ ] First datasets (schemas + **fixture** data in `tests/fixtures/refdata/`):
    `ref_cbam_commodity_codes`, `ref_threshold_rules` (threshold £, forward days,
@@ -156,9 +156,9 @@ clock, money, decisions, tasks.
    synthetic files, marked provisional. Mapping lives in `ref_cds_report_layouts`.
 2. - [ ] `import_batches` + upload endpoint: store original file in Storage, SHA-256
    idempotency, acquisition method (R1-003).
-3. - [x] `source_rows` (raw, immutable) + row validation → `row_exceptions` (missing/invalid
+3. - [ ] `source_rows` (raw, immutable) + row validation → `row_exceptions` (missing/invalid
    commodity code, weight, tax point inputs, origin, value, supplier mapping) (R1-025).
-4. - [x] Normalise into `declarations`, `import_lines`, `parties` with exact commodity code,
+4. - [ ] Normalise into `declarations`, `import_lines`, `parties` with exact commodity code,
    net mass kg (6 dp), customs value + valuation basis, origin as declared (R1-005, R1-010).
 5. - [ ] Importer / declarant / agent / acting-on-behalf relationships (R1-006).
 6. - [ ] Liable-person determination rule + decision record; fixtures for direct importer,
@@ -192,9 +192,9 @@ clock, money, decisions, tasks.
    in/out + rule/dataset version (R1-007).
 2. - [ ] Geography facts: GB/XI EORI context, NI, Crown Dependencies, Overseas Territories,
    UK Continental Shelf; rules via `ref_geography_rules` (R1-009).
-3. - [x] Origin: declared vs validated origin, evidence links, UK-origin exemption only with
+3. - [ ] Origin: declared vs validated origin, evidence links, UK-origin exemption only with
    evidence; conflicts → exception (R1-032).
-4. - [x] Exclusions as rule outcomes: private/non-business use, UK origin, Returned Goods
+4. - [ ] Exclusions as rule outcomes: private/non-business use, UK origin, Returned Goods
    Relief (export date, re-import within 3 years, same-state evidence, NI Union-goods
    variant), temporary admission full relief; evidence requirement per outcome; the
    linked-ETS exemption list exists but is empty (R1-011, PRD §6.1).
@@ -224,9 +224,9 @@ clock, money, decisions, tasks.
    floor), earliest-date combination, exclusions of out-of-scope / excluded / flagged lines.
 2. - [ ] Minimal forecast input (expected tax point + value + source) to feed the forward test
    (full versioned register is R1-037 in Phase 10).
-3. - [x] `threshold_snapshots` + `threshold_events` with decision IDs; snapshot stores the
+3. - [ ] `threshold_snapshots` + `threshold_events` with decision IDs; snapshot stores the
    set of included lines (hash) and totals.
-4. - [x] Celery beat: daily forward run; backward run on the 1st (UK date); operational
+4. - [ ] Celery beat: daily forward run; backward run on the 1st (UK date); operational
    daily recompute never creates a legal backward event on other days (TH-07).
 5. - [ ] Warning at the configured ratio (80% fixture/default) and trigger → notifications +
    tasks; trigger moves registration profile to `registrable` with trigger date.
@@ -250,10 +250,10 @@ clock, money, decisions, tasks.
    basis), installation products/routes, preferred language (R1-015).
 2. - [ ] Client onboarding: organisation wizard + suppliers/installations/contacts CSV with
    preview, row errors, idempotent commit (R1-051).
-3. - [x] Readiness questionnaire per installation (monitoring status, verifier appointed,
+3. - [ ] Readiness questionnaire per installation (monitoring status, verifier appointed,
    expected data year, EU CBAM data, evidence owner, sector-specific capability) — visible
    before the first request (R1-016).
-4. - [x] `ref_sector_forms` data for cement (clinker basis), fertiliser (nitrogen basis),
+4. - [ ] `ref_sector_forms` data for cement (clinker basis), fertiliser (nitrogen basis),
    aluminium (PFCs), hydrogen, iron & steel: gases, functional unit, routes, questions,
    evidence slots; fields mapped to the HMRC Carbon Price Verification Form and EU template
    where known (R1-028).
@@ -293,9 +293,9 @@ clock, money, decisions, tasks.
    state; **EN, TR, ZH, HI, DE** approved for pilot; English fallback (R1-047 subset).
 2. - [ ] Schedule engine: Day 0 / 7 / 14 / 21 reminders while incomplete, Day 28 escalation
    to operations (no default decision); schedule from `ref`/config, not constants (R1-018).
-3. - [x] Test time-scale `OUTREACH_TIME_SCALE_SECONDS_PER_DAY`; production start-up refuses
+3. - [ ] Test time-scale `OUTREACH_TIME_SCALE_SECONDS_PER_DAY`; production start-up refuses
    non-real value (R1-053).
-4. - [x] Resend adapter + local mail catcher adapter; message records with template version;
+4. - [ ] Resend adapter + local mail catcher adapter; message records with template version;
    webhook endpoint (signature verified) for delivered/bounced/complained; suppression list;
    hard bounce → task (R1-046).
 5. - [ ] Documents: upload to Storage (content-sniffed allow-list, size limit), versions,
@@ -319,8 +319,8 @@ clock, money, decisions, tasks.
    registration status, outreach status per supplier, documents received/missing, upcoming
    deadlines, unresolved items.
 2. - [ ] Portfolio view for operations: all clients with health indicators and filters.
-3. - [x] Task list UI: my tasks, overdue, by client; assign, complete with reason.
-4. - [x] Dashboard numbers come from the same queries as detail screens (no second calculation).
+3. - [ ] Task list UI: my tasks, overdue, by client; assign, complete with reason.
+4. - [ ] Dashboard numbers come from the same queries as detail screens (no second calculation).
 5. - [ ] Demo tenant script (R1-058): creates/resets a tenant with synthetic data covering
    the main scenarios; refuses to run in production. Used in Phase 9 UAT and demos.
 
@@ -337,8 +337,8 @@ clock, money, decisions, tasks.
 1. - [ ] Hosting set up per OPS-DEC-010: staging + production Supabase projects, containers,
    Redis, Resend domain, Sentry, secrets, backups (`docs/DEPLOYMENT.md`).
 2. - [ ] Load test: 10,000-line import ≤ 5 min; dashboard p95; bulk document upload.
-3. - [x] Backup/restore drill on staging; restore log saved.
-4. - [x] Security: ZAP baseline, `security` agent review of R1, manual checks (cross-tenant,
+3. - [ ] Backup/restore drill on staging; restore log saved.
+4. - [ ] Security: ZAP baseline, `security` agent review of R1, manual checks (cross-tenant,
    link abuse, document access, privilege escalation, audit tampering, unsafe upload).
 5. - [ ] Real mobile usability test with a representative factory manager (< 10 min).
 6. - [ ] UAT with the domain owner + ops using the handbook worked example and pilot data;
@@ -370,9 +370,9 @@ R1-034, R1-035, R1-037, R1-038, R1-039, R1-040, R1-047 (rest), R1-049, R1-057, R
    pre-registration capture continues (R1-040).
 2. - [ ] Pre-registration compliance mode: deadline engine with 30-day rule and 31 Jan 2028
    first-year rule, storing which rule produced each date; non-digital route flag (R1-013).
-3. - [x] Registration readiness pack: all fields, sector 12-month weight estimates with method
+3. - [ ] Registration readiness pack: all fields, sector 12-month weight estimates with method
    and evidence, declaration, versioned, PDF/CSV export (R1-014).
-4. - [x] Registration status record: monitor → registrable → registration-ready →
+4. - [ ] Registration status record: monitor → registrable → registration-ready →
    submitted/registered, HMRC ID, history (R1-033).
 5. - [ ] Registration change control: detect material changes, notification task with due-date
    rule, acknowledgement (R1-030).
@@ -384,10 +384,10 @@ R1-034, R1-035, R1-037, R1-038, R1-039, R1-040, R1-047 (rest), R1-049, R1-057, R
    backup/restore procedure documented (R1-026).
 9. - [ ] Customs amendments/replacements: versioned declarations, comparison, re-run of
    affected decisions, impact task when approved results change (R1-034).
-10. - [x] Currency provenance: source amount/currency, conversion method, GBP used (R1-035).
+10. - [ ] Currency provenance: source amount/currency, conversion method, GBP used (R1-035).
 11. - [ ] Forecast register: versioned forecasts with confidence and evidence; changes create
     threshold impact records (R1-037).
-12. - [x] Customs-source reconciliation: duplicates, missing lines, orphans, conflicts across
+12. - [ ] Customs-source reconciliation: duplicates, missing lines, orphans, conflicts across
     batches/manual entries (R1-038).
 13. - [ ] CDS acquisition workbench: acquisition method, source owner, date on every batch (R1-031).
 14. - [ ] Supplier contract/evidence responsibility state, versioned, shown in outreach and
@@ -418,9 +418,9 @@ R1-034, R1-035, R1-037, R1-038, R1-039, R1-040, R1-047 (rest), R1-049, R1-057, R
 2. - [ ] Emissions data model: records, gas components, monitoring periods, production route,
    functional unit, source/provenance, verification status; scope (DIRECT/INDIRECT) separate
    from source (OWN_INSTALLATION/PRECURSOR_GOOD) (R2-002, R2-003).
-3. - [x] Evidence document types: verification report, good-specific verification summary,
+3. - [ ] Evidence document types: verification report, good-specific verification summary,
    Carbon Pricing Verification Form, others — never merged (R2-017, R2-022).
-4. - [x] Data gaps, estimates, verifier conclusions as explicit states (R2-022).
+4. - [ ] Data gaps, estimates, verifier conclusions as explicit states (R2-022).
 5. - [ ] Field lineage: every accepted field and derived intermediate links to document +
    location + validation history (R2-013).
 6. - [ ] Revision workflow: resubmissions create versions; downstream approvals reopen (R2-026).
@@ -441,7 +441,7 @@ R1-034, R1-035, R1-037, R1-038, R1-039, R1-040, R1-047 (rest), R1-049, R1-057, R
    initial rules from handbook: CO2 present, period matches import year, ±50% of sector
    benchmark, method valid, certificate names installation, verifier standards, precursor
    consistency (R2-011).
-3. - [x] Review screen: source document beside extracted values, rule failures, approve /
+3. - [ ] Review screen: source document beside extracted values, rule failures, approve /
    reject / request correction, immutable audit (R2-012).
 
 **Exit gate**
@@ -455,8 +455,8 @@ R1-034, R1-035, R1-037, R1-038, R1-039, R1-040, R1-047 (rest), R1-049, R1-057, R
 1. - [ ] GHG recomputation with versioned gas factors, 5-dp intensity rounding; mismatch with
    verified result → review exception (R2-004, R2-019).
 2. - [ ] Functional-unit and gas applicability validation (clinker, nitrogen, PFC, N2O) (R2-018).
-3. - [x] Production route/process/boundary validation against System Boundaries data (R2-021).
-4. - [x] Monitoring-data year selection: Option 1 (incl. 2027/2026 choice) and Option 2 (R2-007).
+3. - [ ] Production route/process/boundary validation against System Boundaries data (R2-021).
+4. - [ ] Monitoring-data year selection: Option 1 (incl. 2027/2026 choice) and Option 2 (R2-007).
 5. - [ ] Coverage completeness and coverage compatibility with the import population (R2-027, R2-029).
 6. - [ ] Actual/default selection with reason, rule, effective date (R2-005).
 7. - [ ] Precursor compatibility rules and precursor attribution/aggregation/allocation
@@ -475,8 +475,8 @@ R1-034, R1-035, R1-037, R1-038, R1-039, R1-040, R1-047 (rest), R1-049, R1-057, R
 2. - [ ] CPR evidence tracker: Carbon Pricing Verification Form per good, qualifying year
    (two years before import year), scheme, free allowances, thresholds, compensation,
    factor source; multi-scheme/multi-currency components (R2-009, R2-023).
-3. - [x] EU CBAM evidence import mapped to UK fields, never auto-accepted (R2-010).
-4. - [x] Fixtures from two real verifier packages (external blocker).
+3. - [ ] EU CBAM evidence import mapped to UK fields, never auto-accepted (R2-010).
+4. - [ ] Fixtures from two real verifier packages (external blocker).
 
 **Exit gate**
 - [ ] An incomplete verifier or CPR package cannot be accepted
@@ -488,7 +488,7 @@ R1-034, R1-035, R1-037, R1-038, R1-039, R1-040, R1-047 (rest), R1-049, R1-057, R
 1. - [ ] Supplier readiness dashboard: who will force defaults before the return is due (R2-014).
 2. - [ ] Compliance dashboard with **RAG** status per client: evidence completeness, default
    exposure, verification status, CPR readiness, open exceptions; reconciles to cases (R2-016).
-3. - [x] Load/restore/security checks; tag `r2.0`.
+3. - [ ] Load/restore/security checks; tag `r2.0`.
 
 **Exit gate**
 - [ ] All R2 P0 acceptance tests pass; zero unreviewed automated values accepted
@@ -501,8 +501,8 @@ R1-034, R1-035, R1-037, R1-038, R1-039, R1-040, R1-047 (rest), R1-049, R1-057, R
 
 1. - [ ] CBAM rate reference per sector per quarter (R3-001).
 2. - [ ] Transition-rule packages (first annual period, quarters, payment windows) (R3-036).
-3. - [x] Working-day calendar + payment channel catalogue (R3-022).
-4. - [x] Weight and rounding rules incl. fractional-kg cases and HMRC-determined weight (R3-003).
+3. - [ ] Working-day calendar + payment channel catalogue (R3-022).
+4. - [ ] Weight and rounding rules incl. fractional-kg cases and HMRC-determined weight (R3-003).
 5. - [ ] Embedded-emissions calculator with operand trace; golden fixture (formula) (R3-002).
 6. - [ ] FX: HMRC **CBAM** rate for the quarter before the tax point per currency, round down
    2 dp, from `cbam_cpr_exchange_rates` only — never the monthly customs rates (R3-005).
@@ -515,7 +515,7 @@ R1-034, R1-035, R1-037, R1-038, R1-039, R1-040, R1-047 (rest), R1-049, R1-057, R
 1. - [ ] CPR per scheme in the prescribed order; precursor schemes separate; effective price;
    compensation stage; hook for REG-DEC-013 (defaults and CPR) (R3-004).
 2. - [ ] CPR cap at liability; reject unconverted/unevidenced relief (R3-006).
-3. - [x] Net liability from approved R2 inputs only; floor £0 (R3-007).
+3. - [ ] Net liability from approved R2 inputs only; floor £0 (R3-007).
 
 ## Phase 18 — R3c: Returns
 
@@ -523,8 +523,8 @@ R1-034, R1-035, R1-037, R1-038, R1-039, R1-040, R1-047 (rest), R1-049, R1-057, R
 
 1. - [ ] Return line builder per consignment/declaration × code × installation (R3-008).
 2. - [ ] Special-procedure final value/liability rules (a)–(f) (R3-021).
-3. - [x] Registrable-person obligations even before service registration (R3-026).
-4. - [x] Nil returns and reminders (R3-009); due dates from REG-DEC-007 data.
+3. - [ ] Registrable-person obligations even before service registration (R3-026).
+4. - [ ] Nil returns and reminders (R3-009); due dates from REG-DEC-007 data.
 5. - [ ] Approval workflow with configurable approver role (SAO per tenant policy), MFA,
    row_version, immutable approval; filed/approved rows locked by DB trigger + app (R3-010).
 6. - [ ] Amendments only for errors within the window; **default→actual lock** (not
@@ -538,8 +538,8 @@ R1-034, R1-035, R1-037, R1-038, R1-039, R1-040, R1-047 (rest), R1-049, R1-057, R
 1. - [ ] Filing adapter boundary + filing-ready export ("exactly what to enter", handbook §4.8);
    live submission disabled until TECH-DEC-004 and BUS-DEC-003 close (R3-011).
 2. - [ ] Submission lineage: receipt, acknowledgement, rejection, calculation method (R3-023).
-3. - [x] Idempotency keys, request fingerprint, controlled retry (R3-030).
-4. - [x] Payment ledger with due dates from working-day rules and authorised methods (R3-012).
+3. - [ ] Idempotency keys, request fingerprint, controlled retry (R3-030).
+4. - [ ] Payment ledger with due dates from working-day rules and authorised methods (R3-012).
 
 ## Phase 20 — R3e: Compliance cases and enforcement
 
@@ -548,9 +548,9 @@ R1-034, R1-035, R1-037, R1-038, R1-039, R1-040, R1-047 (rest), R1-049, R1-057, R
 1. - [ ] Compliance case layer: notices, assessments, compulsory registration, penalties,
    reviews, appeals (R3-019).
 2. - [ ] Review/appeal timetable engine (R3-031).
-3. - [x] Penalty and interest ledger from reference data (£500 record-keeping; £500 + £40 daily
+3. - [ ] Penalty and interest ledger from reference data (£500 record-keeping; £500 + £40 daily
    notification) and penalty defence workflow (R3-016, R3-034).
-4. - [x] Artificial separation review + HMRC direction workflow (R3-024, R3-032).
+4. - [ ] Artificial separation review + HMRC direction workflow (R3-024, R3-032).
 5. - [ ] Tax-avoidance / deliberate-misstatement case types, never auto-concluding (R3-027).
 6. - [ ] Record-preservation directions and information requests with legal hold (R3-028, R3-033).
 
@@ -561,8 +561,8 @@ R1-034, R1-035, R1-037, R1-038, R1-039, R1-040, R1-047 (rest), R1-049, R1-057, R
 1. - [ ] Registration lifecycle: changes, succession (21-day, six-month), insolvency,
    deregistration, final returns (R3-020).
 2. - [ ] Repayment claims with three-year window, unjust enrichment, reimbursement records (R3-015).
-3. - [x] Retention-anchor calculation and legal holds (R3-035).
-4. - [x] Evidence pack: one click, deterministic, six-year, with reference-data versions (R3-017).
+3. - [ ] Retention-anchor calculation and legal holds (R3-035).
+4. - [ ] Evidence pack: one click, deterministic, six-year, with reference-data versions (R3-017).
 5. - [ ] Closure reconciliation checklist (R3-025) and tenant export (R3-037).
 6. - [ ] Dry-run returns with real client data for a full period; load/restore/security; tag `r3.0`.
 

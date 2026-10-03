@@ -27,7 +27,8 @@ end $$;
 
 def upgrade() -> None:
     op.execute(_CREATE_ROLES)
-    op.execute("create schema if not exists cbam authorization cbam_owner")
+    op.execute("create schema if not exists cbam")
+    op.execute("alter schema cbam owner to cbam_owner")
     op.execute("grant usage on schema cbam to cbam_app")
     op.execute(
         "alter default privileges for role cbam_owner in schema cbam "
@@ -47,6 +48,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("drop schema if exists cbam cascade")
-    op.execute("drop role if exists cbam_app")
-    op.execute("drop role if exists cbam_owner")
+    # The schema holds Alembic's own version table and the roles are cluster-level, so
+    # neither is dropped here. Downgrade removes what upgrade granted.
+    op.execute(
+        "alter default privileges for role cbam_owner in schema cbam "
+        "revoke select, insert, update, delete on tables from cbam_app"
+    )
+    op.execute(
+        "alter default privileges for role cbam_owner in schema cbam "
+        "revoke usage, select on sequences from cbam_app"
+    )
+    op.execute("revoke usage on schema cbam from cbam_app")

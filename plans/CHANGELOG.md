@@ -11,7 +11,7 @@ IDs it touches. Releases are tagged `r1-pilot`, `r1-live`, `r2.0`, `r3.0`.
   against Docker/Postgres/GitHub): `backend/` uv project, FastAPI health endpoints,
   settings, Sentry with PII scrubbing, Celery heartbeat task, Alembic with schema/roles
   migration, Redis compose, CI workflow, float-ban script, pre-commit config.
-- Phase 0 steps 5, 9 and most of 8 (shadcn/ui still open): `supabase/config.toml` (TOTP MFA on, min password 12, `cbam`
+- Phase 0 steps 5, 7 (migration run up/down/up on Postgres 16), 9 and most of 8 (shadcn/ui still open): `supabase/config.toml` (TOTP MFA on, min password 12, `cbam`
   not exposed), `frontend/` (Vite, React, TS, Tailwind, `ops/` and `portal/` routes,
   eslint, prettier, vitest, Playwright + axe) and a Celery worker + beat run against
   local Redis. shadcn/ui components are not initialised yet. Leaked-password protection

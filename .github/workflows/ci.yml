@@ -7,6 +7,16 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://postgres:ci@localhost:5432/postgres
     defaults:
       run:
         working-directory: backend
@@ -18,7 +28,7 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run mypy app
       - run: ../scripts/float_ban.sh
-      - run: uv run pytest tests/unit tests/scenarios -q
+      - run: uv run pytest tests/unit tests/scenarios tests/integration -q
       - run: uv run pip-audit
 
   frontend:
