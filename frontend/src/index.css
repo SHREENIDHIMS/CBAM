@@ -1,0 +1,13 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@theme {
+  --color-background: #ffffff;
+  --color-foreground: #0a0a0a;
+  --color-primary: #171717;
+  --color-primary-foreground: #fafafa;
+  --color-accent: #f5f5f5;
+  --color-accent-foreground: #171717;
+  --color-input: #d4d4d4;
+  --color-ring: #2563eb;
+}

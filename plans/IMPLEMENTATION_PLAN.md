@@ -31,27 +31,27 @@ before any business code.
    Handbook gate: you can explain the £50k two-test threshold and why default
    values are expensive, in your own words.
 2. - [ ] Install tools: Python 3.12, `uv`, Node 22, Docker Desktop, Supabase CLI, `gh`.
-3. - [ ] `backend/`: `uv init`; add Phase-0 dependencies (`docs/TECHNICAL_SPEC.md` §3);
+3. - [x] `backend/`: `uv init`; add Phase-0 dependencies (`docs/TECHNICAL_SPEC.md` §3);
    `pyproject.toml` with ruff (E,F,I,B,UP,S,DTZ,RUF), mypy config, pytest config.
-4. - [ ] `backend/app/main.py` with `/health/live` and `/health/ready`; `app/core/config.py`
+4. - [x] `backend/app/main.py` with `/health/live` and `/health/ready`; `app/core/config.py`
    reading env vars from `.env.example`.
-5. - [ ] `supabase init` → `supabase/config.toml`; set MFA (TOTP) on, leaked-password
+5. - [x] `supabase init` → `supabase/config.toml`; set MFA (TOTP) on, leaked-password
    protection on, min password length 12; remove `cbam` from exposed schemas.
-6. - [ ] `infra/docker-compose.yml` with Redis (and ClamAV under profile `scan`).
-7. - [ ] Alembic initialised for schema `cbam`; first migration creates schema, roles
+6. - [x] `infra/docker-compose.yml` with Redis (and ClamAV under profile `scan`).
+7. - [x] Alembic initialised for schema `cbam`; first migration creates schema, roles
    `cbam_owner` and `cbam_app`, and revokes `anon`/`authenticated` on `cbam`.
-8. - [ ] `frontend/`: Vite + React + TS; Tailwind + shadcn/ui; routes `ops/` and `portal/`;
+8. - [x] `frontend/`: Vite + React + TS; Tailwind + shadcn/ui; routes `ops/` and `portal/`;
    eslint, prettier, vitest, Playwright + axe; `/api` proxy to :8000.
-9. - [ ] Celery app (`app/core/jobs.py`) with one no-op task and beat entry, proving the
+9. - [x] Celery app (`app/core/jobs.py`) with one no-op task and beat entry, proving the
    worker and beat run locally.
-10. - [ ] Sentry wired (disabled when DSN empty) with PII scrubbing.
+10. - [x] Sentry wired (disabled when DSN empty) with PII scrubbing.
 11. - [ ] GitHub Actions CI per `docs/TESTING.md` §5 (Supabase CLI in CI); float-ban grep;
     `gitleaks`; pre-commit hooks for ruff/prettier/gitleaks.
-12. - [ ] Write the threshold scenario catalogue TH-01…TH-11 as **failing, skipped**
+12. - [x] Write the threshold scenario catalogue TH-01…TH-11 as **failing, skipped**
     tests with inputs and expected outcomes in `backend/tests/scenarios/test_threshold.py`
     (spec R1-012 requires these written before implementation). The domain owner
     checks the hand calculations.
-13. - [ ] Ask the regulatory-analyst agent to re-check every source in spec §23/§30 and
+13. - [x] Ask the regulatory-analyst agent to re-check every source in spec §23/§30 and
     `docs/GAP_ANALYSIS.md` §10.3, including HMRC's autumn 2026 guidance and the October
     2026 webinar material, and record retrieval dates. Log any change. Repeat this
     re-check before the Pilot and Live releases.
@@ -72,12 +72,12 @@ before any business code.
 clock, money, decisions, tasks.
 **Requirements:** R1-001, R1-002, R1-022 (engine), R1-023, R1-042, R1-043, R1-044, R1-045
 
-1. - [ ] `core/dates.py`: `uk_date()`, `quarter()`, `accounting_period()` (via reference
+1. - [x] `core/dates.py`: `uk_date()`, `quarter()`, `accounting_period()` (via reference
    data hook); property tests incl. BST/GMT boundaries (R1-043).
-2. - [ ] `core/clock.py`: `Clock` protocol, `SystemClock`, `FrozenClock`; FastAPI dependency.
-3. - [ ] `core/money.py`: Decimal context, `quantize(value, places, mode)` where mode is
+2. - [x] `core/clock.py`: `Clock` protocol, `SystemClock`, `FrozenClock`; FastAPI dependency.
+3. - [x] `core/money.py`: Decimal context, `quantize(value, places, mode)` where mode is
    required; JSON encoder that emits decimals as strings (R1-044).
-4. - [ ] Tables `tenants`, `organisations`, `users` (profile), `memberships`,
+4. - [x] Tables `tenants`, `organisations`, `users` (profile), `memberships`,
    `approval_roles` with RLS; RLS coverage test that fails for any tenant table without
    forced RLS (R1-001).
 5. - [ ] `core/db.py`: request-scoped transaction that sets `app.tenant_id` after the
@@ -87,24 +87,24 @@ clock, money, decisions, tasks.
 7. - [ ] `core/permissions.py`: roles `platform_admin`, `operations`, `client_admin`,
    `reviewer`, `approver`, `supplier`, `tax_agent`, `domain_owner`; permission map;
    `require("perm")` dependency; permission-matrix test incl. tax-agent restrictions (R1-002).
-8. - [ ] `audit_events` table + append-only trigger + grants + hash chain; `core/audit.py`
+8. - [x] `audit_events` table + append-only trigger + grants + hash chain; `core/audit.py`
    `record()`; nightly chain-verify task; tests: UPDATE/DELETE as `cbam_app` fail (R1-023).
-9. - [ ] `core/decisions.py` + `decisions` table: canonical-JSON fingerprint, save, lookup.
-10. - [ ] `row_version` mixin + `If-Match` handling → 409 on mismatch (R1-045).
-11. - [ ] `core/errors.py`: problem+json handler, domain error types.
+9. - [x] `core/decisions.py` + `decisions` table: canonical-JSON fingerprint, save, lookup.
+10. - [x] `row_version` mixin + `If-Match` handling → 409 on mismatch (R1-045).
+11. - [x] `core/errors.py`: problem+json handler, domain error types.
 12. - [ ] `tasks` module: task model, owner, due date + `due_rule`, status machine,
     escalation history; API list/patch (R1-022 engine; UI later).
 13. - [ ] Frontend: Supabase Auth sign-in, MFA enrolment + challenge, sign-out, password
     reset; app shell; `/me`; role-aware navigation; British English formatting helpers
     (`14 March 2027`, `£1,234.56`) with tests.
 14. - [ ] Platform admin screens: create tenant, invite users, assign roles (R1-001).
-15. - [ ] Structured logging (`structlog`) with request/tenant/user IDs, no PII.
+15. - [x] Structured logging (`structlog`) with request/tenant/user IDs, no PII.
 
 **Exit gate**
 - [ ] Automated test: a user of tenant A cannot read or write any tenant-B row via API or direct SQL as `cbam_app` (handbook "RLS proven")
 - [ ] Privileged role without MFA is refused
-- [ ] Audit rows cannot be changed; chain verifies
-- [ ] Concurrent approval test returns one success and one 409
+- [x] Audit rows cannot be changed; chain verifies
+- [x] Concurrent approval test returns one success and one 409
 
 ---
 
