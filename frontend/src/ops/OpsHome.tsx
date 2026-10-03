@@ -16,8 +16,8 @@ export function OpsHome() {
         We could not load your account.
       </p>
     )
-  const { memberships, platform_admin: platformAdmin } = me.data
-  if (memberships.length === 1 && !platformAdmin) {
+  const { memberships, platform_admin: platformAdmin, domain_owner: domainOwner } = me.data
+  if (memberships.length === 1 && !platformAdmin && !domainOwner) {
     return <Navigate to={`/ops/t/${memberships[0].tenant_id}`} replace />
   }
   return (
@@ -30,10 +30,17 @@ export function OpsHome() {
           </Link>
         </p>
       )}
+      {(platformAdmin || domainOwner) && (
+        <p className="mb-4">
+          <Link className="underline" to="/ops/reference-data">
+            Reference data
+          </Link>
+        </p>
+      )}
       {memberships.length === 0 ? (
         <p>
-          {platformAdmin
-            ? 'You are a platform administrator and are not a member of any client account.'
+          {platformAdmin || domainOwner
+            ? 'You are not a member of any client account.'
             : 'You do not have access to any client account yet. Ask an administrator to add you.'}
         </p>
       ) : (

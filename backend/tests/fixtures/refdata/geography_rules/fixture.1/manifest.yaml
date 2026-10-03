@@ -1,0 +1,12 @@
+dataset: geography_rules
+version: "fixture.1"
+source_id: FIXTURE-TEST-SOURCE
+source_title: Test fixture source (not law)
+source_type: guidance
+retrieved_at: 2026-10-03
+source_status: laid
+fixture: true
+effective_from: 2027-01-01
+effective_to: null
+checksum_sha256: 7bff92e3047f233174819261e7b7d9e25e943bed99a948990b16b002e38f163e
+notes: "Fixture only (test data, not law). PLACEHOLDER: no legal claim. Whether Northern Ireland (XI) is in UK CBAM scope for every import is an open question for the domain owner."

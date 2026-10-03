@@ -1,0 +1,4 @@
+jurisdiction,day,is_working_day
+GB-FIXTURE,2028-05-30,true
+GB-FIXTURE,2028-05-31,true
+GB-FIXTURE,2028-06-03,false

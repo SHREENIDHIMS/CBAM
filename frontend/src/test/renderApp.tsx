@@ -35,6 +35,7 @@ export function me(overrides: Partial<Me> = {}): Me {
   return {
     user_id: 'u1',
     platform_admin: false,
+    domain_owner: false,
     mfa: { required: false, passed: false },
     memberships: [
       {

@@ -1,0 +1,5 @@
+code_prefix,listing_text,sector,description,greenhouse_gases,in_scope,exclusion_within
+7601,7601,aluminium,Unwrought aluminium,Carbon dioxide and perfluorocarbons,true,
+72,72,iron_and_steel,Iron and steel,Carbon dioxide,true,
+7204,Except 7204,iron_and_steel,"Ferrous waste and scrap, remelting scrap ingots and steel",,false,72
+280410,2804 10,hydrogen,Hydrogen,Carbon dioxide,true,

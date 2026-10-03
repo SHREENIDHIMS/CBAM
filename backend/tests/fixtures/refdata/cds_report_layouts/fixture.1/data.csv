@@ -1,0 +1,3 @@
+report_type,column_name,maps_to,required
+import_item,fixture_column,declaration.mrn,true
+import_header,fixture_other,,false

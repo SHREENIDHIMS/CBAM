@@ -26,7 +26,7 @@ tampered figure in a return, or evidence lost before six years.
 | Information disclosure | Cross-tenant read; link leaks in referrer/logs; PII in logs | RLS + app filter + tests; token swapped for cookie and removed from URL; `Referrer-Policy: no-referrer`; no PII in logs; signed URLs ≤ 5 min |
 | Denial of service | Huge upload; import flood | Size limits, content-type allow-list, per-tenant job concurrency, request rate limits |
 | Elevation of privilege | Supplier reaches ops API; agent registers liable person | Separate portal API surface and session type; permission per route; permission-matrix tests; tax-agent restrictions (R1-002) |
-| Wrong law | Draft notice activated; bad reference file | Source activation rule, domain-owner approval, dry-run impact report, checksums (R1-050, R2-020) |
+| Wrong law | Draft notice activated; bad reference file | Source activation rule, domain-owner approval (platform-level grant, ADR-0003), dry-run impact report sealed to the version, reason and warning acknowledgement, checksums (R1-050, R2-020). Residual: a stolen `cbam_app` credential can spoof `app.user_id`; a separate loader/approver credential is an open item |
 
 ## 3. Controls by area
 

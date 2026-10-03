@@ -113,14 +113,14 @@ clock, money, decisions, tasks.
 **Goal:** law-as-data machinery before any rule uses it.
 **Requirements:** R1-050 (and the R1 subset of R2-020's status model)
 
-1. - [ ] Tables `regulatory_sources`, `ref_datasets`, `ref_dataset_versions` (`docs/DATABASE.md` §4).
-2. - [ ] Loader CLI `app.modules.refdata.load`: manifest schema validation, checksum,
+1. - [x] Tables `regulatory_sources`, `ref_datasets`, `ref_dataset_versions` (`docs/DATABASE.md` §4).
+2. - [x] Loader CLI `app.modules.refdata.load`: manifest schema validation, checksum,
    idempotency, "same version different checksum" refusal.
-3. - [ ] Activation workflow: dry-run impact report → `domain_owner` approval (recent MFA)
+3. - [x] Activation workflow: dry-run impact report → `domain_owner` approval (recent MFA)
    → `active`; audit; previous version `retired` without deleting.
-4. - [ ] `v_active_<dataset>` view pattern implementing the source activation rule
+4. - [x] `v_active_<dataset>` view pattern implementing the source activation rule
    (`docs/DATABASE.md` §5); generic `get(dataset, key, on=date)` service.
-5. - [ ] First datasets (schemas + **fixture** data in `tests/fixtures/refdata/`):
+5. - [x] First datasets (schemas + **fixture** data in `tests/fixtures/refdata/`):
    `ref_cbam_commodity_codes`, `ref_threshold_rules` (threshold £, forward days,
    backward months, backward test day, 2027 look-back floor, **warning ratio 80%**),
    `ref_registration_rules`, `ref_service_state`, `ref_exclusion_rules`,
@@ -129,20 +129,22 @@ clock, money, decisions, tasks.
    `ref_cds_report_layouts` (column layouts of the HMRC "Get customs data" reports, R1-054),
    `ref_customs_monthly_exchange_rates` (customs value conversion, R1-035).
    Keep `cbam_cpr_exchange_rates` a **separate** dataset (R3 phase; PRD §6.1).
-6a. - [ ] Seed `ref_compliance_calendar` as a `pending` version from the HMRC policy summary
+6a. - [x] Seed `ref_compliance_calendar` as a `pending` version from the HMRC policy summary
    (31 May 2028; 31 Jul, 29 Sep, 30 Nov 2028; 28 Feb 2029) for domain-owner
    confirmation (REG-DEC-007). Not activated until the legal source is confirmed.
 6. - [ ] Real CBAM commodity-code list transcribed from the HMRC source into
    `backend/refdata/cbam_commodity_codes/<version>/` by the developer, checked by the
    domain owner (handbook: "CN code list accuracy" is Jenny's).
-7. - [ ] Platform screens (read-only list + activate button): sources, datasets, versions,
+   *Transcribed 3 Oct 2026 (54 rows, `scripts/refdata/transcribe_cbam_commodity_codes.py`); the
+   domain-owner check is still to do (REG-DEC-018), so this step stays open.*
+7. - [x] Platform screens (read-only list + activate button): sources, datasets, versions,
    impact report.
 
 **Exit gate**
-- [ ] A `draft` source's data cannot be returned by any `get()` (test)
-- [ ] Reloading the same folder changes nothing; tampered file refused
-- [ ] Impact report lists affected lines for a changed code list (fixture)
-- [ ] Real commodity-code dataset loaded on local, pending domain-owner activation
+- [x] A `draft` source's data cannot be returned by any `get()` (test)
+- [x] Reloading the same folder changes nothing; tampered file refused
+- [x] Impact report lists affected lines for a changed code list (fixture; the import-line provider is registered in Phase 3)
+- [x] Real commodity-code dataset loaded on local, pending domain-owner activation
 
 ---
 

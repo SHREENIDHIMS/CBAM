@@ -1,0 +1,12 @@
+dataset: threshold_rules
+version: "fixture.1"
+source_id: FIXTURE-TEST-SOURCE
+source_title: Test fixture source (not law)
+source_type: guidance
+retrieved_at: 2026-10-03
+source_status: laid
+fixture: true
+effective_from: 2027-01-01
+effective_to: null
+checksum_sha256: 5a63a4cf86dcc12bec91833a925b1f1a1f58a851501be5b80ae2be3baf58b2b3
+notes: "Fixture only (test data, not law). 50000.00, 30 days, 12 months on day 1: GAP_ANALYSIS section 12 C6 (FA 2026 Sch 17 para 2). Look-back floor 2027-01-01: FA 2026 s.158(1) (effect for goods imported on or after 1 January 2027). The 0.8 warning ratio is a product setting, not law (plans/IMPLEMENTATION_PLAN.md Phase 2 step 5)."

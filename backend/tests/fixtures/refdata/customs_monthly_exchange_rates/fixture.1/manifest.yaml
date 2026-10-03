@@ -1,0 +1,12 @@
+dataset: customs_monthly_exchange_rates
+version: "fixture.1"
+source_id: FIXTURE-TEST-SOURCE
+source_title: Test fixture source (not law)
+source_type: guidance
+retrieved_at: 2026-10-03
+source_status: laid
+fixture: true
+effective_from: 2027-01-01
+effective_to: null
+checksum_sha256: d50b074f24354ffa9c580533482ce216f4f99e2b477db4b9ee609dfde187e300
+notes: "Fixture only (test data, not law). Invented rates for tests."

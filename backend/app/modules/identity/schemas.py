@@ -19,5 +19,6 @@ class MfaState(BaseModel):
 class MeOut(BaseModel):
     user_id: UUID
     platform_admin: bool
+    domain_owner: bool  # a registered platform domain owner (reference-data approver)
     memberships: list[MembershipOut]
     mfa: MfaState

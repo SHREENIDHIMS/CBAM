@@ -46,7 +46,9 @@ uv sync
 # Supabase `postgres` user (default password `postgres`, port 54322):
 export MIGRATIONS_DATABASE_URL=postgresql+psycopg://postgres:postgres@127.0.0.1:54322/postgres
 uv run alembic upgrade head                        # PowerShell: $env:MIGRATIONS_DATABASE_URL="..."
-# Fixture reference-data loader arrives in Phase 2 (not available yet).
+# Reference data loads as `pending` (DATABASE_URL = the app role). A domain owner activates it in
+# the app; register one first with `python -m app.cli.bootstrap_domain_owner` (see ADR-0003).
+uv run python -m app.modules.refdata.load refdata/cbam_commodity_codes/2027.1 refdata/compliance_calendar/2026-09-09
 uv run uvicorn app.main:app --reload               # API  http://localhost:8000
 uv run celery -A app.core.jobs worker -l info      # worker (new terminal)
 uv run celery -A app.core.jobs beat -l info        # scheduler (new terminal)

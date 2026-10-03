@@ -13,6 +13,7 @@ from uuid import UUID
 import pytest
 from alembic import command
 from alembic.config import Config
+from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.engine import make_url
 
@@ -101,3 +102,17 @@ def make_member(engine: Engine, tenant: UUID, user: UUID, *roles: str) -> None:
             ),
             {"i": uuid7(), "u": user, "t": tenant, "r": list(roles)},
         )
+
+
+@pytest.fixture
+def client(app_engine: Engine) -> Iterator[TestClient]:
+    """The API with token verification and the database swapped for the test ones."""
+    from app.core.tenancy import get_engine_dep, get_verifier
+    from app.main import create_app
+    from tests.helpers_auth import verifier
+
+    app = create_app()
+    app.dependency_overrides[get_verifier] = verifier
+    app.dependency_overrides[get_engine_dep] = lambda: app_engine
+    with TestClient(app) as c:
+        yield c

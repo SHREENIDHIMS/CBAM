@@ -81,8 +81,9 @@ revoke update, delete, truncate on audit_events from cbam_app;
 ### Reference data & sources (R1-050, R2-020)
 - `regulatory_sources` (source_id text unique, title, source_type, url, publication_date, status `draft|laid|in_force|commenced|superseded`, commencement_date, effective_from/to, retrieved_at, checksum, supersedes_source_id, notes)
 - `ref_datasets` (name unique) · `ref_dataset_versions` (dataset_id, version, source_id, checksum, status `pending|active|retired`, loaded_at, activated_by, activated_at, impact_report jsonb)
+- `platform_domain_owners` (user_id) — the people who may activate reference data or put a source in force (ADR-0003). Granted by an operator on the database, never through the app. Like every `cbam` table these have forced RLS; the policies are open, and the guard is the grants plus triggers: data rows only enter a `pending` version and never change; a version leaves `pending` only for a domain owner; a source is registered `draft`/`laid` unless a domain owner says otherwise; nothing is deleted.
 - One table per dataset, each with `dataset_version_id`, `effective_from`, `effective_to` + business columns, e.g.:
-  - `ref_cbam_commodity_codes` (code, sector, description, in_scope, exclusion_note)
+  - `ref_cbam_commodity_codes` (code_prefix, listing_text, sector, description, greenhouse_gases, in_scope, exclusion_within) — listed headings and sub-headings, longest-prefix lookup; `in_scope=false` rows are HMRC's "Except" entries
   - `ref_threshold_rules` (threshold_gbp, forward_days, backward_months, backward_test_day, lookback_floor_date)
   - `ref_registration_rules` (rule `ordinary_30_day|first_year_transitional`, days, fixed_deadline)
   - `ref_service_state` (service, opening_date)
@@ -96,12 +97,12 @@ revoke update, delete, truncate on audit_events from cbam_app;
   - `ref_compliance_calendar` (period, return_due, payment_due) — seeded `pending` from the policy summary (REG-DEC-007)
   - R2/R3: `ref_gas_factors`, `ref_functional_units`, `ref_production_routes`, `ref_system_boundaries`, `ref_default_emissions`, `ref_default_methodology`, `ref_validation_rules`, `ref_verification_rules`, `ref_evidence_types`, `ref_carbon_price_schemes`, `ref_exchange_rates`, `ref_cbam_rates`, `ref_compliance_calendar`, `ref_penalty_rules`, `ref_interest_rules`, `ref_retention_rules`, `ref_payment_methods`, `ref_precursor_allocation_rules`, `ref_transition_packages`, `ref_enforcement_case_types`
 
-Exclusion constraint example:
+Exclusion constraint (as built: only one version of a dataset is active, so non-overlap within a version is enough; `btree_gist` is required):
 
 ```sql
-alter table ref_cbam_commodity_codes add constraint no_overlap
-  exclude using gist (code with =, daterange(effective_from, effective_to) with &&)
-  where (dataset_version_status = 'active');   -- via a generated/denormalised column
+alter table ref_cbam_commodity_codes add constraint ref_cbam_commodity_codes_no_overlap
+  exclude using gist (dataset_version_id with =, code_prefix with =,
+                      daterange(effective_from, effective_to) with &&);
 ```
 
 ### Decisions (all releases)
@@ -171,13 +172,17 @@ A reference row may be used for a transaction on legal date `d` only if:
 
 ```
 dataset_version.status = 'active'
-AND source.status IN ('in_force','commenced')
+AND source.status IN ('in_force','commenced','superseded')   -- superseded needs effective_to; see below
 AND (source.commencement_date IS NULL OR source.commencement_date <= d)
 AND row.effective_from <= d AND (row.effective_to IS NULL OR d < row.effective_to)
 ```
 
 This lives in one SQL view per dataset (`v_active_<dataset>`), and services read only
-from those views.
+from those views. A view cannot take the date, so it exposes `usable_from` / `usable_to`
+(the row's period narrowed by the source's commencement and effective period) and the
+lookup filters `usable_from <= d AND (usable_to IS NULL OR d < usable_to)`. The source
+effective period is applied in addition to the rule above. A test runs the SQL view and
+the pure rule in `refdata/rules.py` against the same cases.
 
 ## 6. Migrations
 
