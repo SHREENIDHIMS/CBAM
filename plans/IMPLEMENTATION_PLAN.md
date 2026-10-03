@@ -103,7 +103,7 @@ clock, money, decisions, tasks.
 **Exit gate**
 - [ ] Automated test: a user of tenant A cannot read or write any tenant-B row via API or direct SQL as `cbam_app` (handbook "RLS proven")
 - [ ] Privileged role without MFA is refused
-- [ ] Audit rows cannot be changed; chain verifies
+- [x] Audit rows cannot be changed; chain verifies
 - [x] Concurrent approval test returns one success and one 409
 
 ---
