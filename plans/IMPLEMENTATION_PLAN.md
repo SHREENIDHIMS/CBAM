@@ -77,7 +77,7 @@ clock, money, decisions, tasks.
 2. - [x] `core/clock.py`: `Clock` protocol, `SystemClock`, `FrozenClock`; FastAPI dependency.
 3. - [x] `core/money.py`: Decimal context, `quantize(value, places, mode)` where mode is
    required; JSON encoder that emits decimals as strings (R1-044).
-4. - [ ] Tables `tenants`, `organisations`, `users` (profile), `memberships`,
+4. - [x] Tables `tenants`, `organisations`, `users` (profile), `memberships`,
    `approval_roles` with RLS; RLS coverage test that fails for any tenant table without
    forced RLS (R1-001).
 5. - [ ] `core/db.py`: request-scoped transaction that sets `app.tenant_id` after the

@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, text
 
 TEST_URL = os.environ.get("TEST_DATABASE_URL")
@@ -38,7 +39,8 @@ def test_migrations_up_down_up(monkeypatch: pytest.MonkeyPatch) -> None:
     command.downgrade(cfg, "base")
     assert _scalar("select has_schema_privilege('cbam_app', 'cbam', 'usage')") is False
     command.upgrade(cfg, "head")
-    assert _scalar("select version_num from cbam.alembic_version") == "0001"
+    head = ScriptDirectory.from_config(cfg).get_current_head()
+    assert _scalar("select version_num from cbam.alembic_version") == head
 
 
 def test_app_role_is_not_owner_and_cannot_bypass_rls(monkeypatch: pytest.MonkeyPatch) -> None:

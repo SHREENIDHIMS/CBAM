@@ -43,6 +43,8 @@ def upgrade() -> None:
     op.execute(_ALLOW_OWNERSHIP)
     op.execute("create schema if not exists cbam")
     op.execute("alter schema cbam owner to cbam_owner")
+    # Later migrations run `set local role cbam_owner`, which must also own Alembic's table.
+    op.execute("alter table if exists cbam.alembic_version owner to cbam_owner")
     op.execute("grant usage on schema cbam to cbam_app")
     op.execute(
         "alter default privileges for role cbam_owner in schema cbam "
