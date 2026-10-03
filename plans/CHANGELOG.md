@@ -16,6 +16,7 @@ IDs it touches. Releases are tagged `r1-pilot`, `r1-live`, `r2.0`, `r3.0`.
   eslint, prettier, vitest, Playwright + axe) and a Celery worker + beat run against
   local Redis. shadcn/ui components are not initialised yet. Leaked-password protection
   is a hosted Supabase setting still to be switched on.
+- Migration 0001 now works for Supabase's non-superuser `postgres` role (found on first Windows run): grants itself membership in `cbam_owner` and gives it CREATE on the database.
 - R1-012: skipped threshold scenario catalogue TH-01..TH-11 awaiting domain-owner check.
 
 ### Added

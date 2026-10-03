@@ -25,8 +25,22 @@ end $$;
 """
 
 
+# Supabase's `postgres` user is not a true superuser: it can create roles but cannot act as
+# them or give them schema ownership unless granted. Harmless on a real superuser.
+_ALLOW_OWNERSHIP = """
+do $$
+begin
+  if current_user <> 'cbam_owner' then
+    execute format('grant cbam_owner to %I', current_user);
+  end if;
+  execute format('grant create on database %I to cbam_owner', current_database());
+end $$;
+"""
+
+
 def upgrade() -> None:
     op.execute(_CREATE_ROLES)
+    op.execute(_ALLOW_OWNERSHIP)
     op.execute("create schema if not exists cbam")
     op.execute("alter schema cbam owner to cbam_owner")
     op.execute("grant usage on schema cbam to cbam_app")
