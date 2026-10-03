@@ -24,30 +24,13 @@ from app.core.tenancy import (
 )
 from app.main import create_app
 from tests.helpers_auth import bearer, verifier
-from tests.integration.conftest import make_tenant
+from tests.integration.conftest import make_member, make_tenant, make_user
 
 T = "/api/v1/tenants"
 
 
-def _user(engine: Engine, *, status: str = "active") -> UUID:
-    uid = uuid7()
-    with tenant_session(engine, tenant_id=None, platform=True) as s:
-        s.execute(
-            text("insert into cbam.users (id, email, status) values (:i, :e, :s)"),
-            {"i": uid, "e": f"u-{uid.hex}@example.test", "s": status},
-        )
-    return uid
-
-
-def _member(engine: Engine, tenant: UUID, user: UUID, *roles: str) -> None:
-    with tenant_session(engine, tenant_id=tenant) as s:
-        s.execute(
-            text(
-                "insert into cbam.memberships (id, user_id, tenant_id, roles)"
-                " values (:i, :u, :t, cast(:r as text[]))"
-            ),
-            {"i": uuid7(), "u": user, "t": tenant, "r": list(roles)},
-        )
+_user = make_user
+_member = make_member
 
 
 def _platform_admin(engine: Engine, user: UUID) -> None:

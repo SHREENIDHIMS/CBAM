@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str = ""
     # How recent a login must be for sensitive actions (decided 3 Oct 2026: 15 minutes).
     recent_auth_minutes: int = 15
+    # Product workflow, not law (CLAUDE.md rule 13): days overdue at which a task escalates.
+    task_escalation_overdue_days: tuple[int, ...] = (7, 14, 28)
     sentry_dsn: str = ""
     sentry_environment: str = "local"
     # R1-053: seconds that count as one "day" in the outreach schedule.

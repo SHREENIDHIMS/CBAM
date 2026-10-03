@@ -92,7 +92,7 @@ clock, money, decisions, tasks.
 9. - [x] `core/decisions.py` + `decisions` table: canonical-JSON fingerprint, save, lookup.
 10. - [x] `row_version` mixin + `If-Match` handling → 409 on mismatch (R1-045).
 11. - [x] `core/errors.py`: problem+json handler, domain error types.
-12. - [ ] `tasks` module: task model, owner, due date + `due_rule`, status machine,
+12. - [x] `tasks` module: task model, owner, due date + `due_rule`, status machine,
     escalation history; API list/patch (R1-022 engine; UI later).
 13. - [ ] Frontend: Supabase Auth sign-in, MFA enrolment + challenge, sign-out, password
     reset; app shell; `/me`; role-aware navigation; British English formatting helpers

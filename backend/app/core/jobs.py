@@ -9,6 +9,10 @@ from app.core.config import get_settings
 celery_app = Celery("cbam", broker=get_settings().redis_url)
 celery_app.conf.beat_schedule = {
     "heartbeat": {"task": "app.core.jobs.heartbeat", "schedule": 300.0},
+    "escalate-overdue-tasks": {
+        "task": "app.core.jobs.escalate_overdue_tasks",
+        "schedule": crontab(hour=6, minute=0),
+    },
     "audit-verify-chains": {
         "task": "app.core.jobs.verify_audit_chains",
         "schedule": crontab(hour=2, minute=30),
@@ -36,3 +40,37 @@ def verify_audit_chains() -> str:
         structlog.get_logger().error("audit_chain_broken", chains=broken)
         raise AuditChainBrokenError(f"audit chain broken for: {sorted(broken)}")
     return "ok"
+
+
+@celery_app.task(name="app.core.jobs.escalate_overdue_tasks")  # type: ignore[untyped-decorator]
+def escalate_overdue_tasks() -> int:
+    """Daily: raise the escalation level of overdue tasks in every tenant (R1-022)."""
+    from uuid import UUID
+
+    from sqlalchemy import text
+    from sqlalchemy.orm import Session
+
+    from app.core.clock import SystemClock
+    from app.core.db import get_engine, run_as_tenant, tenant_session
+    from app.modules.tasks.service import escalate_overdue
+
+    engine, clock = get_engine(), SystemClock()
+    thresholds = get_settings().task_escalation_overdue_days
+    with tenant_session(engine, tenant_id=None, platform=True) as s:
+        tenant_ids = list(
+            s.execute(text("select id from cbam.tenants where status = 'active'")).scalars()
+        )
+    total = 0
+    for tenant_id in tenant_ids:
+
+        def escalate(session: Session, tenant_id: UUID = tenant_id) -> int:
+            return escalate_overdue(
+                session,
+                tenant_id=tenant_id,
+                as_of=clock.today_uk(),
+                thresholds_days=thresholds,
+                now=clock.now(),
+            )
+
+        total += run_as_tenant(engine, tenant_id, escalate)
+    return total

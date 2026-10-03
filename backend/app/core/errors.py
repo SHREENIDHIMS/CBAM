@@ -58,6 +58,20 @@ class NotPermittedError(DomainError):
     title = "You do not have permission for this action"
 
 
+class InvalidRequestError(DomainError):
+    """The request is well formed but cannot be applied (422)."""
+
+    status = 422
+    title = "The request cannot be applied"
+
+
+class ReasonRequiredError(DomainError):
+    """The change needs a non-empty reason (422)."""
+
+    status = 422
+    title = "A reason is required for this change"
+
+
 class AuthenticationError(DomainError):
     """No valid credentials (401)."""
 
