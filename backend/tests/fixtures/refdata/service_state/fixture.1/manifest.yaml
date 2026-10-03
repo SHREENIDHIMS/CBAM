@@ -1,0 +1,12 @@
+dataset: service_state
+version: "fixture.1"
+source_id: FIXTURE-TEST-SOURCE
+source_title: Test fixture source (not law)
+source_type: guidance
+retrieved_at: 2026-10-03
+source_status: laid
+fixture: true
+effective_from: 2027-01-01
+effective_to: null
+checksum_sha256: 5388bac43f640b9d60ef6a12c15a16ddd13df074fc8b804165fe5b4fad6e6791
+notes: "Fixture only (test data, not law). GAP_ANALYSIS section 12 C9."

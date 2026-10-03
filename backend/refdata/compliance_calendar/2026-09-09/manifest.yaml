@@ -1,0 +1,20 @@
+dataset: compliance_calendar
+version: "2026-09-09"
+source_id: HMRC-CBAM-POLICY-SUMMARY
+source_title: "Carbon Border Adjustment Mechanism (CBAM) policy summary"
+source_type: guidance
+source_url: https://www.gov.uk/government/publications/carbon-border-adjustment-mechanism-cbam-policy-summary/carbon-border-adjustment-mechanism-cbam-policy-summary
+publication_date: 2026-09-09
+retrieved_at: 2026-10-03
+source_status: draft
+effective_from: 2027-01-01
+effective_to: null
+checksum_sha256: 9e06f7adb36c1815edcd67f8199fb69e8192fa0b7bc981ed9588c8cbb11ce230
+fixture: false
+notes: >-
+  REG-DEC-007. Dates copied from the HMRC policy summary of 9 Sep 2026 (returns and payments:
+  2027 by 31 May 2028; Q1 2028 by 31 Jul 2028; Q2 by 29 Sep 2028; Q3 by 30 Nov 2028; Q4 by
+  28 Feb 2029). Seeded pending for the domain owner. The legal source is probably FA 2026 Sch 17
+  paras 6(3) and 7(2) with SI 2026/830 regs 2 and 3 (GAP_ANALYSIS section 12 C2), but that is not
+  confirmed and the working-day calendar is still open (REG-DEC-016). Do not activate, and do not
+  set the source in force, until the domain owner has confirmed both.

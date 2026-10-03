@@ -1,0 +1,55 @@
+code_prefix,listing_text,sector,description,greenhouse_gases,in_scope,exclusion_within
+7601,7601,aluminium,Unwrought aluminium,Carbon dioxide and perfluorocarbons,true,
+7603,7603,aluminium,Aluminium powders and flakes,Carbon dioxide and perfluorocarbons,true,
+7604,7604,aluminium,"Aluminium bars, rods and profiles",Carbon dioxide and perfluorocarbons,true,
+7605,7605,aluminium,Aluminium wire,Carbon dioxide and perfluorocarbons,true,
+7606,7606,aluminium,"Aluminium plates, sheets and strip, of a thickness exceeding 0,2 millimetres (mm)",Carbon dioxide and perfluorocarbons,true,
+7607,7607,aluminium,"Aluminium foil (whether or not printed or backed with paper, paper-board, plastics or similar backing materials) of a thickness (excluding any backing) not exceeding 0.,2mm",Carbon dioxide and perfluorocarbons,true,
+7608,7608,aluminium,Aluminium tubes and pipes,Carbon dioxide and perfluorocarbons,true,
+7609,7609,aluminium,"Aluminium tube or pipe fittings (for example, couplings, elbows, sleeves)",Carbon dioxide and perfluorocarbons,true,
+7610,7610,aluminium,"Aluminium structures (excluding prefabricated buildings of heading 9406) and parts of structures (for example, bridges and bridge-sections, towers, lattice masts, roofs, roofing frameworks, doors and windows and their frames and thresholds for doors, balustrades, pillars and columns); aluminium plates, rods, profiles, tubes and the like, prepared for use in structures",Carbon dioxide and perfluorocarbons,true,
+7611,7611,aluminium,"Aluminium reservoirs, tanks, vats and similar containers, for any material (other than compressed or liquefied gas), of a capacity exceeding 300 litres (l), whether or not lined or heat-insulated, but not fitted with mechanical or thermal equipment",Carbon dioxide and perfluorocarbons,true,
+7612,7612,aluminium,"Aluminium casks, drums, cans, boxes and similar containers (including rigid or collapsible tubular containers), for any material (other than compressed or liquefied gas), of a capacity not exceeding 300l, whether or not lined or heat-insulated, but not fitted with mechanical or thermal equipment",Carbon dioxide and perfluorocarbons,true,
+7613,7613,aluminium,Aluminium containers for compressed or liquefied gas,Carbon dioxide and perfluorocarbons,true,
+7614,7614,aluminium,"Stranded wire, cables, plaited bands and the like, of aluminium, not electrically insulated",Carbon dioxide and perfluorocarbons,true,
+7616,7616,aluminium,Other articles of aluminium,Carbon dioxide and perfluorocarbons,true,
+25070080,2507 00 80,cement,Other kaolinic clays,Carbon dioxide,true,
+252310,2523 10,cement,Cement clinkers,Carbon dioxide,true,
+252321,2523 21,cement,"White Portland cement, whether or not artificially coloured",Carbon dioxide,true,
+252329,2523 29,cement,Other Portland cement,Carbon dioxide,true,
+252330,2523 30,cement,Aluminous cement,Carbon dioxide,true,
+252390,2523 90,cement,Other hydraulic cements,Carbon dioxide,true,
+280800,2808 00,fertiliser,"Nitric acid, sulphonitric acids",Carbon dioxide and nitrous oxide,true,
+2814,2814,fertiliser,"Ammonia, anhydrous or in aqueous solution",Carbon dioxide,true,
+283421,2834 21,fertiliser,Nitrates of potassium,Carbon dioxide and nitrous oxide,true,
+3102,3102,fertiliser,"Mineral or chemical fertilisers, nitrogenous",Carbon dioxide and nitrous oxide,true,
+3105,3105,fertiliser,"Mineral or chemical fertilisers containing 2 or 3 of the fertilising elements nitrogen, phosphorus and potassium, other fertilisers, goods of this chapter in tablets or similar forms or in packages of a gross weight not exceeding 10kg",Carbon dioxide and nitrous oxide,true,
+310560,Except 3105 60 within 3105,fertiliser,Mineral or chemical fertilisers containing the 2 fertilising elements phosphorus and potassium,,false,3105
+280410,2804 10,hydrogen,Hydrogen,Carbon dioxide,true,
+260112,2601 12,iron_and_steel,"Agglomerated iron ores and concentrates, other than roasted iron pyrites",Carbon dioxide,true,
+72,72,iron_and_steel,Iron and steel,Carbon dioxide,true,
+7301,7301,iron_and_steel,"Sheet piling of iron or steel, whether or not drilled, punched or made from assembled elements, welded angles, shapes and sections, of iron or steel",Carbon dioxide,true,
+7302,7302,iron_and_steel,"Railway or tramway track construction material of iron or steel, the following: rails, check-rails and rack rails, switch blades, crossing frogs, point rods and other crossing pieces, sleepers (cross-ties), fish- plates, chairs, chair wedges, sole plates (base plates), rail clips, bedplates, ties and other material specialised for jointing or fixing rails",Carbon dioxide,true,
+7303,7303,iron_and_steel,"Tubes, pipes and hollow profiles, of cast iron",Carbon dioxide,true,
+7304,7304,iron_and_steel,"Tubes, pipes and hollow profiles, seamless, of iron (other than cast iron) or steel",Carbon dioxide,true,
+7305,7305,iron_and_steel,"Other tubes and pipes (for example, welded, riveted or similarly closed), having circular cross-sections, the external diameter of which exceeds 406,4mm, of iron or steel",Carbon dioxide,true,
+7306,7306,iron_and_steel,"Other tubes, pipes and hollow profiles (for example, open seam or welded, riveted or similarly closed), of iron or steel",Carbon dioxide,true,
+7307,7307,iron_and_steel,"Tube or pipe fittings (for example, couplings, elbows, sleeves), of iron or steel",Carbon dioxide,true,
+7308,7308,iron_and_steel,"Structures (excluding prefabricated buildings of heading 9406) and parts of structures (for example, bridges and bridge-sections, lock-gates, towers, lattice masts, roofs, roofing frameworks, doors and windows and their frames and thresholds for doors, shutters, balustrades, pillars and columns), of iron or steel, plates, rods, angles, shapes, sections, tubes and the like, prepared for use in structures, of iron or steel",Carbon dioxide,true,
+7309,7309,iron_and_steel,"Reservoirs, tanks, vats and similar containers for any material (other than compressed or liquefied gas), of iron or steel, of a capacity exceeding 300l, whether or not lined or heat-insulated, but not fitted with mechanical or thermal equipment",Carbon dioxide,true,
+7310,7310,iron_and_steel,"Tanks, casks, drums, cans, boxes and similar containers, for any material (other than compressed or liquefied gas), of iron or steel, of a capacity not exceeding 300l, whether or not lined or heat-insulated, but not fitted with mechanical or thermal equipment",Carbon dioxide,true,
+7311,7311,iron_and_steel,"Containers for compressed or liquefied gas, of iron or steel",Carbon dioxide,true,
+7318,7318,iron_and_steel,"Screws, bolts, nuts, coach screws, screw hooks, rivets, cotters, cotter pins, washers (including spring washers) and similar articles, of iron or steel",Carbon dioxide,true,
+7326,7326,iron_and_steel,Other articles of iron or steel,Carbon dioxide,true,
+720221,Except 7202 21 within 72,iron_and_steel,Ferro-silicon,,false,72
+720230,Except 7202 30 within 72,iron_and_steel,Ferro-silico-manganese,,false,72
+720250,Except 7202 50 within 72,iron_and_steel,Ferro-silico-chromium,,false,72
+720270,Except 7202 70 within 72,iron_and_steel,Ferro-molybdenum,,false,72
+720280,Except: 7202 80 within 72,iron_and_steel,Ferro-tungsten and ferro-silico-tungsten,,false,72
+720291,Except 7202 91 within 72,iron_and_steel,Ferro-titanium and ferro-silico-titanium,,false,72
+720292,Except 7202 92 within 72,iron_and_steel,Ferro-vanadium,,false,72
+720293,Except 7202 93 within 72,iron_and_steel,Ferro-niobium,,false,72
+72029910,Except 7202 99 10 within 72,iron_and_steel,Ferro-phosphorus,,false,72
+72029930,Except 7202 99 30 within 72,iron_and_steel,Ferro-silico-magnesium,,false,72
+72029980,Except 7202 99 80 within 72,iron_and_steel,Other,,false,72
+7204,Except 7204,iron_and_steel,"Ferrous waste and scrap, remelting scrap ingots and steel",,false,72

@@ -1,0 +1,12 @@
+dataset: cbam_commodity_codes
+version: "fixture.1"
+source_id: FIXTURE-TEST-SOURCE
+source_title: Test fixture source (not law)
+source_type: guidance
+retrieved_at: 2026-10-03
+source_status: laid
+fixture: true
+effective_from: 2027-01-01
+effective_to: null
+checksum_sha256: ffe62166bf800053ae15a0401232b1eaeaadba77d17a8c276700e3f55f6e1b11
+notes: "Fixture only (test data, not law). Rows copied from the HMRC goods-in-scope pages of 16 Jul 2026 to exercise prefix matching."

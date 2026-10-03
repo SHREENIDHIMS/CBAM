@@ -1,0 +1,12 @@
+dataset: working_days
+version: "fixture.1"
+source_id: FIXTURE-TEST-SOURCE
+source_title: Test fixture source (not law)
+source_type: guidance
+retrieved_at: 2026-10-03
+source_status: laid
+fixture: true
+effective_from: 2028-01-01
+effective_to: null
+checksum_sha256: ba8c6588f2250be5c1e9ace128dc70ca4a4579ab26290e8bd31a38a854a6e330
+notes: "Fixture only (test data, not law)."

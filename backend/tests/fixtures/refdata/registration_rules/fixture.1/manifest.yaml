@@ -1,0 +1,12 @@
+dataset: registration_rules
+version: "fixture.1"
+source_id: FIXTURE-TEST-SOURCE
+source_title: Test fixture source (not law)
+source_type: guidance
+retrieved_at: 2026-10-03
+source_status: laid
+fixture: true
+effective_from: 2027-01-01
+effective_to: null
+checksum_sha256: 2ca327cfaef8ceeb52079455d512b123cc3a98c6bbdaf9c93a6197236d731d49
+notes: "Fixture only (test data, not law). GAP_ANALYSIS section 12 C1 and C6 (SI 2026/830 reg 2(2); Sch 17 para 2(4))."

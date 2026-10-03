@@ -32,7 +32,12 @@ _READ_CORE = {"tenant:read", "tasks:read", "imports:read", "suppliers:read", "do
 
 ROLE_PERMISSIONS: Mapping[str, frozenset[str]] = {
     "platform_admin": frozenset(
-        {"platform:tenants_manage", "platform:users_manage", "platform:audit_read"}
+        {
+            "platform:tenants_manage",
+            "platform:users_manage",
+            "platform:audit_read",
+            "platform:refdata_read",
+        }
     ),
     "operations": frozenset(
         _READ_CORE

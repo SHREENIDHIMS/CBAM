@@ -1,0 +1,12 @@
+dataset: sector_forms
+version: "fixture.1"
+source_id: FIXTURE-TEST-SOURCE
+source_title: Test fixture source (not law)
+source_type: guidance
+retrieved_at: 2026-10-03
+source_status: laid
+fixture: true
+effective_from: 2027-01-01
+effective_to: null
+checksum_sha256: 9130436a3cb3484d8d3eeb73713e9b23de9a4aa6238bd9e76db8b9db45439d0d
+notes: "Fixture only (test data, not law). Schema only: the real sector forms arrive with R1 supplier forms."

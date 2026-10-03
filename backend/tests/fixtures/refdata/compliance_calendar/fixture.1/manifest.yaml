@@ -1,0 +1,12 @@
+dataset: compliance_calendar
+version: "fixture.1"
+source_id: FIXTURE-TEST-SOURCE
+source_title: Test fixture source (not law)
+source_type: guidance
+retrieved_at: 2026-10-03
+source_status: laid
+fixture: true
+effective_from: 2027-01-01
+effective_to: null
+checksum_sha256: 5cafb6a10bb013e03cbaee42df7f5b3307e6ea83819e3345d9a434bb1d446918
+notes: "Fixture only (test data, not law). Copied from the HMRC policy summary of 9 Sep 2026 (REG-DEC-007)."

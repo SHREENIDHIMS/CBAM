@@ -1,0 +1,12 @@
+dataset: origin_rules
+version: "fixture.1"
+source_id: FIXTURE-TEST-SOURCE
+source_title: Test fixture source (not law)
+source_type: guidance
+retrieved_at: 2026-10-03
+source_status: laid
+fixture: true
+effective_from: 2027-01-01
+effective_to: null
+checksum_sha256: e23b61e2b3424f52217983fc2bd98205cf7d48ba0d7c1958ae59ab8b172edbcb
+notes: "Fixture only (test data, not law)."

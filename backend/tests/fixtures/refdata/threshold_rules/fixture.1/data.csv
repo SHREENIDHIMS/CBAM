@@ -1,0 +1,2 @@
+threshold_gbp,forward_days,backward_months,backward_test_day,lookback_floor_date,warning_ratio
+50000.00,30,12,1,2027-01-01,0.8000

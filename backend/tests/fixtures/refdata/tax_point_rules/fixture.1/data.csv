@@ -1,0 +1,2 @@
+rule_key,procedure_code,tax_point_event,description
+fixture.example,,fixture_event,Fixture row only

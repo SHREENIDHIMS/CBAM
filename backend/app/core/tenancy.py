@@ -171,6 +171,51 @@ def require_platform(
     return dependency
 
 
+def require_refdata(
+    permission: str, *, recent_auth: bool = False
+) -> Callable[..., PlatformContext]:
+    """Reference data is platform-wide, so it is not guarded by a client role.
+
+    `refdata:activate` (and any other `refdata:` permission) needs a registered platform domain
+    owner; a client admin can hand out the `domain_owner` role inside their own client, so that
+    role alone must never reach global law (ADR-0003). `refdata:read` also accepts platform
+    admins. Both need an aal2 token; sensitive actions need a recent login.
+    """
+
+    def dependency(
+        user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+        engine: Annotated[Engine, Depends(get_engine_dep)],
+        clock: Annotated[Clock, Depends(get_clock)],
+        settings: Annotated[Settings, Depends(get_settings)],
+    ) -> PlatformContext:
+        with tenant_session(engine, tenant_id=None, user_id=user.user_id) as s:
+            owner = s.execute(
+                text("select 1 from cbam.platform_domain_owners where user_id = :u"),
+                {"u": user.user_id},
+            ).scalar_one_or_none()
+            admin = s.execute(
+                text("select 1 from cbam.platform_admins where user_id = :u"), {"u": user.user_id}
+            ).scalar_one_or_none()
+        perms: frozenset[str] = frozenset()
+        if owner is not None:
+            perms = permissions_for(["domain_owner"])
+        elif admin is not None and permission == "refdata:read":
+            perms = frozenset({"refdata:read"})
+        if permission not in perms:
+            raise NotPermittedError(
+                "Reference data is limited to domain owners and platform admins"
+            )
+        require_mfa_for_roles(user, ["domain_owner" if owner is not None else "platform_admin"])
+        if recent_auth:
+            require_recent_auth(
+                user, now=clock.now(), max_age=timedelta(minutes=settings.recent_auth_minutes)
+            )
+        bind_context(user_id=str(user.user_id))
+        return PlatformContext(user=user, permissions=perms, engine=engine)
+
+    return dependency
+
+
 def iter_roles_needing_mfa(roles: tuple[str, ...]) -> Iterator[str]:
     """Roles in `roles` that require MFA; used by /me to explain why."""
     return (r for r in roles if mfa_required([r]))

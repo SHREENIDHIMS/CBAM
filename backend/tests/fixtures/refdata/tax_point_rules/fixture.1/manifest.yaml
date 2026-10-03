@@ -1,0 +1,12 @@
+dataset: tax_point_rules
+version: "fixture.1"
+source_id: FIXTURE-TEST-SOURCE
+source_title: Test fixture source (not law)
+source_type: guidance
+retrieved_at: 2026-10-03
+source_status: laid
+fixture: true
+effective_from: 2027-01-01
+effective_to: null
+checksum_sha256: 6aa57f561a327a1a3a420172a3903d6d2e5858cb2fd037f0e445ded463c9e1cc
+notes: "Fixture only (test data, not law)."
