@@ -51,7 +51,7 @@ before any business code.
     tests with inputs and expected outcomes in `backend/tests/scenarios/test_threshold.py`
     (spec R1-012 requires these written before implementation). The domain owner
     checks the hand calculations.
-13. - [ ] Ask the regulatory-analyst agent to re-check every source in spec §23/§30 and
+13. - [x] Ask the regulatory-analyst agent to re-check every source in spec §23/§30 and
     `docs/GAP_ANALYSIS.md` §10.3, including HMRC's autumn 2026 guidance and the October
     2026 webinar material, and record retrieval dates. Log any change. Repeat this
     re-check before the Pilot and Live releases.

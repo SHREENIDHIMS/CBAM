@@ -244,9 +244,7 @@ a `made`-but-not-commenced source must not drive a 2026 `as_of` decision.
 Phase 0 step 13. Primary texts fetched on 2026-10-03 from legislation.gov.uk (made / enacted
 text) and the GOV.UK content API. This verifies or refutes the snippet-based findings in §11.
 Legal interpretations still need domain-owner sign-off (GOV-DEC-009); nothing here activates
-reference data. **Not yet read in primary text:** FA 2026 Sch 17 paras 33–39 (penalties),
-SI 2026/994 and 995 detail, qualifying carbon pricing schemes list, HMRC exchange-rate
-publication (not published; due from 1 Jan 2027), any HMRC autumn 2026 guidance on defaults.
+reference data. Addendum below (§12.1) closes the sources first left unread.
 
 | # | Result | Primary evidence |
 |---|---|---|
@@ -255,7 +253,7 @@ publication (not published; due from 1 Jan 2027), any HMRC autumn 2026 guidance 
 | C3 | **CONFIRMED: not in the Act.** Para 8(1): amend a return only to correct an error. Para 8(3): HMRC notice sets how and by when. The 3-year window exists only in the draft force-of-law notice ("within 3 years of the end of the accounting period"), which has force of law via para 8(3) once commenced | Sch 17 para 8; GOV.UK draft notice |
 | C3b | **Default → actual lock CONFIRMED** in statute: para 8(2) "No amendment may be made to replace information on the emissions embodied in CBAM goods determined using default values set under paragraph 11 with such information determined in accordance with regulations under paragraph 10" | Sch 17 para 8(2) |
 | C4 | **PARTLY CONFIRMED.** The statute and SI 2026/802 reg 6: records relating to an accounting period are kept 6 years beginning with the day after the end of that period; other records 6 years from creation. GOV.UK guidance says "latest of" creation and period end, which differs from the SI wording; the SI governs. Reimbursement records (SI 802): 6 years from the later of period end and reimbursement day. Guidance: repayment-claim records 6 years from the date the claim is sent (not found in the SI text read) | Sch 17 para 14(3); SI 2026/802 reg 6; GOV.UK keeping-records |
-| C5 | **STILL UNVERIFIED** (paras 33–39 not read). SI 830 reg 3 confirmed as a Sch 24 table change only | — |
+| C5 | **CONFIRMED** (see §12.1). Paras 33–40 read. SI 830 reg 3 is a Sch 24 table change only | FA 2026 Sch 17 paras 33–40 |
 | C6 | **CONFIRMED.** Both tests use "£50,000 or more": backward test applies "on the first day of the month" over the preceding 12 months; forward test "expected to import ... before the end of a period of 30 days". TH-01 (exactly £50,000.00 triggers) is right. Para 2(4): register within 30 days beginning with the day of first trigger, subject to the 31 Jan 2028 override | Sch 17 para 2(2), (4) |
 | C7 | **CONFIRMED.** SI 2026/809 title: "Calculation of CBAM Rate and Determination of Carbon Price Relief Regulations 2026". Spec §23 uses a shorter name (spec is read-only) | legislation.gov.uk/uksi/2026/809 |
 | C8 | **PARTLY CONFIRMED.** SI 809 reg 14 leaves the exchange rate and procedure to an HMRC notice (not yet published; rates from 1 Jan 2027). GOV.UK guidance: use the rate for "the calendar quarter prior to the point of import". PRD R3-005 says "before the tax point"; the guidance says point of import. Domain owner to confirm they are the same date | SI 809 reg 14; GOV.UK CPR guidance |
@@ -271,4 +269,41 @@ wording; add SI 2026/830 to the source registry plan (`made`, commences 1 Jan 20
 Source-registry scenario tests to add: 2027 trigger uses the 31 Jan 2028 deadline, a 2028
 trigger uses the 30-day rule (SI 830 reg 2(2)); due-date rule with override at the
 30 Jun / 1 Jul 2028 boundary.
+
+### 12.1 Remaining sources (3 Oct 2026)
+
+- **Penalties, Sch 17 paras 33–40 (C5 confirmed).** Para 34 adds failure to notify (para 2) to
+  FA 2008 Sch 41 (potential lost revenue measured from the end of the 30-day period to
+  registration; "may" replaces "shall" in para 16(1)). Para 35 adds late returns to FA 2021
+  Sch 24 table item 6. Para 36 adds return errors to FA 2007 Sch 24. Para 37 adds late payment
+  to FA 2021 Sch 26, with four payment-date cases (normal due date; HMRC default assessment:
+  the date it would have been due; amended return: 30 days after the amendment; other
+  assessment: 30 days after the assessment). Para 38: fixed £500 + £40 per day for failing to
+  notify changed registration information (para 4) or death/incapacity (para 17). Para 39:
+  £500 for failing to keep or preserve records. Para 40: reasonable excuse (insufficiency of
+  funds is not one) and double jeopardy. **Spec §26 (£500 + £40, £500) is therefore correct but
+  incomplete: three further regimes apply.** Amounts stay reference data (CLAUDE.md rule 1).
+  Note: the £500 + £40 daily penalty is for notification changes (para 4, para 17), not for failing
+  to register (that is FA 2008 Sch 41); spec §26 line 629 and R3-016 blur this, so fixture
+  tests must separate the two.
+- **SI 2026/994:** appoints 1 Jan 2027 for FA 2009 ss101–102 (late-payment and repayment
+  interest) for CBAM, including penalties. Consistent with spec.
+- **SI 2026/995 (Emissions and Verification):** made 8 Sep 2026, laid 9 Sep, in force 1 Jan 2027;
+  it states it was made partly because of a defect in SI 2026/802. Detail not analysed here:
+  R2 phases must read it in full before the emissions rules are written.
+- **Qualifying carbon pricing schemes list:** first published 27 Aug 2026, titled "provisional",
+  no later version. Reference data from it must be loaded as `provisional`.
+- **Goods that may not contribute to the threshold (HMRC guidance, 16 Jul 2026):** private use,
+  UK origin, returned goods relief, temporary admission with full relief, and special customs
+  procedure goods. The statute (para 2(3)) disregards UK-origin/returned goods and special-
+  procedure goods later exported. TH-10 covers UK origin and exclusions only; add private use,
+  returned goods relief and temporary admission variants in Phase 5.
+- **Newer HMRC publications:** the main CBAM collection was last updated 9 Sep 2026. Nothing
+  newer on GOV.UK as of 3 Oct 2026: no default values, no illustrative rate, no CPR exchange
+  rates (due from 1 Jan 2027), no registration opening date. HMRC webinar material is not
+  published on GOV.UK; not verified.
+- **Not retrievable:** trade-tariff.service.gov.uk returned HTTP 403 from its own CDN. Not
+  used for CPR (PRD R3-005), so no impact; the HMRC Exchange-rates API is irrelevant to CBAM.
+- **Retrieval dates:** every source above was retrieved 2026-10-03 (made/enacted text from
+  legislation.gov.uk, content API from GOV.UK).
 

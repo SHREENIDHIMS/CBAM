@@ -27,7 +27,7 @@ IDs it touches. Releases are tagged `r1-pilot`, `r1-live`, `r2.0`, `r3.0`.
   network, design in Phase 6), R1-058 (demo tenant), R1-059 and R1-060 (backlog).
 
 ### Changed
-- Primary-source re-check 3 Oct 2026 in `docs/GAP_ANALYSIS.md` §12: SI 2026/830 and FA 2026 Sch 17 paras 2, 6, 7, 8, 9, 14 read in full; C1, C2, C3, C6, C7, C9, C10, C12 confirmed; penalties (paras 33–39) not yet read.
+- Primary-source re-check 3 Oct 2026 in `docs/GAP_ANALYSIS.md` §12: SI 2026/830 and FA 2026 Sch 17 paras 2, 6, 7, 8, 9, 14 read in full; C1, C2, C3, C6, C7, C9, C10, C12 confirmed; penalties (paras 33–40), SI 994/995, scheme list and newer HMRC publications checked in §12.1. Phase 0 step 13 done; re-check again before Pilot and Live.
 - Source re-check 2 Oct 2026 recorded in `docs/GAP_ANALYSIS.md` §11 (search snippets only; no primary source fetched; step 13 still open). New open decisions REG-DEC-016, REG-DEC-017; notes added to REG-DEC-001/007/013, TECH-DEC-004, LEGAL-DEC-005, GOV-DEC-009.
 - R2-031 source change watcher moved to the R1 Live cut.
 - Open decisions DATA-DEC-002, REG-DEC-007 and REG-DEC-013 updated with research evidence.
