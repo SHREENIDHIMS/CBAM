@@ -13,6 +13,7 @@ from app.core.logging import (
 )
 from app.core.observability import init_sentry
 from app.modules.identity.api import router as identity_router
+from app.modules.platform_admin.api import router as platform_router
 from app.modules.tasks.api import router as tasks_router
 
 
@@ -37,6 +38,7 @@ def create_app() -> FastAPI:
 
     app.include_router(identity_router, prefix="/api/v1")
     app.include_router(tasks_router, prefix="/api/v1")
+    app.include_router(platform_router, prefix="/api/v1")
 
     @app.get("/health/live")
     def live() -> dict[str, str]:

@@ -34,6 +34,7 @@ export interface Api {
   get<T>(path: string): Promise<T>
   patch<T>(path: string, body: unknown, options: { rowVersion: number }): Promise<T>
   post<T>(path: string, body: unknown): Promise<T>
+  delete(path: string): Promise<void>
 }
 
 async function toApiError(response: Response): Promise<ApiError> {
@@ -87,5 +88,6 @@ export function createApi(
     get: (path) => request('GET', path),
     patch: (path, body, { rowVersion }) => request('PATCH', path, body, rowVersion),
     post: (path, body) => request('POST', path, body),
+    delete: (path) => request<void>('DELETE', path),
   }
 }

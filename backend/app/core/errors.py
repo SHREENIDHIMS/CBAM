@@ -58,6 +58,20 @@ class NotPermittedError(DomainError):
     title = "You do not have permission for this action"
 
 
+class NotConfiguredError(DomainError):
+    """A needed integration is not configured in this environment (503)."""
+
+    status = 503
+    title = "This feature is not configured"
+
+
+class AuthAdminError(DomainError):
+    """The identity provider failed or was unreachable (502). Never carries secrets."""
+
+    status = 502
+    title = "The sign-in service could not complete the request"
+
+
 class InvalidRequestError(DomainError):
     """The request is well formed but cannot be applied (422)."""
 

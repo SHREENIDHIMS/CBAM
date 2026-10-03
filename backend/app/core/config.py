@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 
-from pydantic import model_validator
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PRODUCTION_SECONDS_PER_DAY = 86400
@@ -13,6 +13,7 @@ class Settings(BaseSettings):
 
     app_env: str = "local"
     log_level: str = "INFO"
+    frontend_base_url: str = "http://localhost:5173"
     database_url: str = ""
     redis_url: str = "redis://127.0.0.1:6379/0"
     # Placeholder until BRAND-DEC-015 fixes the product name and domain.
@@ -23,6 +24,8 @@ class Settings(BaseSettings):
     # Local development only (older Supabase CLI signs with a shared secret). Refused in
     # production, where only asymmetric keys from the JWKS are accepted.
     supabase_jwt_secret: str = ""
+    # SECRET. Backend only (inviting users); never in the frontend, logs or errors.
+    supabase_service_role_key: SecretStr = SecretStr("")
     # How recent a login must be for sensitive actions (decided 3 Oct 2026: 15 minutes).
     recent_auth_minutes: int = 15
     # Product workflow, not law (CLAUDE.md rule 13): days overdue at which a task escalates.

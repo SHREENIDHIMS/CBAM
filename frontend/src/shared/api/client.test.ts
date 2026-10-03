@@ -70,6 +70,14 @@ describe('createApi', () => {
     expect(error.slug).toBe('unknown')
   })
 
+  test('DELETE sends the right method and resolves on 204', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    await expect(
+      createApi(async () => 't', fetchImpl).delete('/platform/x'),
+    ).resolves.toBeUndefined()
+    expect(fetchImpl.mock.calls[0][1].method).toBe('DELETE')
+  })
+
   test('204 resolves to undefined', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
     await expect(createApi(async () => 't', fetchImpl).get('/x')).resolves.toBeUndefined()
