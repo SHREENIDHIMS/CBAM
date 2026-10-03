@@ -73,7 +73,30 @@ def test_app_role_cannot_update_delete_or_truncate(app_engine: Engine) -> None:
             s.execute(text(sql))
 
 
-def test_even_the_owner_is_blocked_by_the_trigger(admin_engine: Engine, app_engine: Engine) -> None:
+def _as_owner(conn, tenant: UUID) -> None:  # type: ignore[no-untyped-def]
+    """Act as the table owner inside one tenant (the owner is still bound by forced RLS)."""
+    conn.execute(text("set local role cbam_owner"))
+    conn.execute(text("select set_config('app.tenant_id', :t, true)"), {"t": str(tenant)})
+
+
+def test_owner_cannot_change_rows_through_row_level_security(
+    admin_engine: Engine, app_engine: Engine
+) -> None:
+    """Forced RLS has no update/delete policy, so even the owner changes nothing."""
+    a = make_tenant(app_engine, "A")
+    _write(app_engine, a)
+    with admin_engine.begin() as c:
+        _as_owner(c, a)
+        assert c.execute(text("update cbam.audit_events set reason = 'x'")).rowcount == 0
+        assert c.execute(text("delete from cbam.audit_events")).rowcount == 0
+    with tenant_session(app_engine, tenant_id=a) as s:
+        assert s.execute(text("select reason from cbam.audit_events")).scalar_one() == "rule R1-007"
+
+
+def test_trigger_still_blocks_an_insider_who_switches_rls_off(
+    admin_engine: Engine, app_engine: Engine
+) -> None:
+    """Second line of defence: with RLS disabled the append-only trigger still refuses."""
     a = make_tenant(app_engine, "A")
     _write(app_engine, a)
     for sql in (
@@ -85,6 +108,8 @@ def test_even_the_owner_is_blocked_by_the_trigger(admin_engine: Engine, app_engi
             pytest.raises((InternalError, DBAPIError), match="append-only"),
             admin_engine.begin() as c,
         ):
+            _as_owner(c, a)
+            c.execute(text("alter table cbam.audit_events disable row level security"))
             c.execute(text(sql))
 
 
@@ -93,14 +118,18 @@ def test_tampering_is_detected_by_the_chain_check(admin_engine: Engine, app_engi
     for _ in range(3):
         _write(app_engine, a)
     with admin_engine.begin() as c:
-        # Simulate someone with superuser rights bypassing the guard trigger.
+        # An insider with owner rights switches off both guards and edits one event.
+        _as_owner(c, a)
         c.execute(text("alter table cbam.audit_events disable trigger audit_no_update"))
+        c.execute(text("alter table cbam.audit_events disable row level security"))
         c.execute(
             text(
                 "update cbam.audit_events set reason = 'edited' where tenant_id = :t and chain_seq = 2"
             ),
             {"t": a},
         )
+        c.execute(text("alter table cbam.audit_events enable row level security"))
+        c.execute(text("alter table cbam.audit_events force row level security"))
         c.execute(text("alter table cbam.audit_events enable trigger audit_no_update"))
     with tenant_session(app_engine, tenant_id=a) as s:
         result = verify_chain(s, a)

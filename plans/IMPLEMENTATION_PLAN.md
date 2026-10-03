@@ -89,8 +89,8 @@ clock, money, decisions, tasks.
    `require("perm")` dependency; permission-matrix test incl. tax-agent restrictions (R1-002).
 8. - [x] `audit_events` table + append-only trigger + grants + hash chain; `core/audit.py`
    `record()`; nightly chain-verify task; tests: UPDATE/DELETE as `cbam_app` fail (R1-023).
-9. - [ ] `core/decisions.py` + `decisions` table: canonical-JSON fingerprint, save, lookup.
-10. - [ ] `row_version` mixin + `If-Match` handling → 409 on mismatch (R1-045).
+9. - [x] `core/decisions.py` + `decisions` table: canonical-JSON fingerprint, save, lookup.
+10. - [x] `row_version` mixin + `If-Match` handling → 409 on mismatch (R1-045).
 11. - [x] `core/errors.py`: problem+json handler, domain error types.
 12. - [ ] `tasks` module: task model, owner, due date + `due_rule`, status machine,
     escalation history; API list/patch (R1-022 engine; UI later).
@@ -104,7 +104,7 @@ clock, money, decisions, tasks.
 - [ ] Automated test: a user of tenant A cannot read or write any tenant-B row via API or direct SQL as `cbam_app` (handbook "RLS proven")
 - [ ] Privileged role without MFA is refused
 - [ ] Audit rows cannot be changed; chain verifies
-- [ ] Concurrent approval test returns one success and one 409
+- [x] Concurrent approval test returns one success and one 409
 
 ---
 

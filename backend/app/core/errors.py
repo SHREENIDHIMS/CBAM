@@ -57,6 +57,13 @@ class NotPermittedError(DomainError):
     title = "You do not have permission for this action"
 
 
+class PreconditionRequiredError(DomainError):
+    """If-Match is missing or unusable (RFC 6585 428)."""
+
+    status = 428
+    title = "An If-Match header with the row version is required"
+
+
 class TenantMismatchError(DomainError):
     # 404, not 403: never confirm that another tenant's row exists.
     status = 404
