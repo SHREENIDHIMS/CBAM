@@ -90,6 +90,7 @@ function VersionPanel({
   const impact = useImpactReport(dataset)
   const activate = useActivate(dataset)
   const [confirmed, setConfirmed] = useState(false)
+  const [reason, setReason] = useState('')
 
   if (detail.isPending) return <p role="status">Loading…</p>
   if (detail.isError) return <p role="alert">{describeError(detail.error)}</p>
@@ -142,16 +143,37 @@ function VersionPanel({
 
       {pending && canDecide && report && (
         <div className="mt-6 border-t pt-4">
+          <label htmlFor="activation-reason" className="mb-1 block text-sm font-medium">
+            Why are you activating this version?
+          </label>
+          <input
+            id="activation-reason"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            className="mb-3 w-full rounded-md border border-input px-3 py-2"
+          />
           <label className="mb-3 flex items-start gap-2 text-sm">
             <input
               type="checkbox"
               checked={confirmed}
               onChange={(e) => setConfirmed(e.target.checked)}
             />
-            <span>I have read the impact report and approve this version.</span>
+            <span>
+              I have read the impact report
+              {report.warnings.length > 0 ? ' and its warnings' : ''} and approve this version.
+            </span>
           </label>
           {activate.isError && <p role="alert">{describeError(activate.error)}</p>}
-          <Button disabled={!confirmed || activate.isPending} onClick={() => activate.mutate(v)}>
+          <Button
+            disabled={!confirmed || reason.trim() === '' || activate.isPending}
+            onClick={() =>
+              activate.mutate({
+                version: v,
+                reason: reason.trim(),
+                acknowledge: report.warnings.length > 0,
+              })
+            }
+          >
             Activate version {v.version}
           </Button>
         </div>

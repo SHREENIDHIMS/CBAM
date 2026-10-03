@@ -172,7 +172,7 @@ A reference row may be used for a transaction on legal date `d` only if:
 
 ```
 dataset_version.status = 'active'
-AND source.status IN ('in_force','commenced')
+AND source.status IN ('in_force','commenced','superseded')   -- superseded needs effective_to; see below
 AND (source.commencement_date IS NULL OR source.commencement_date <= d)
 AND row.effective_from <= d AND (row.effective_to IS NULL OR d < row.effective_to)
 ```

@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import Engine
 
+from app.core.errors import RuleBlockedError
 from app.modules.refdata import load as loader
 from app.modules.refdata import service
 from app.modules.refdata.manifest import parse_manifest
@@ -67,18 +68,22 @@ def test_the_cli_loads_refuses_and_reloads(
     assert loader.main([]) == 2
 
 
-def test_goods_lookups_match_the_examples_printed_by_hmrc(
+def test_goods_lookups_match_the_examples_printed_by_hmrc_and_sch_16(
     app_engine: Engine, admin_engine: Engine
 ) -> None:
     """Once the domain owner has activated the list and set its source in force."""
     owner = make_owner(app_engine, admin_engine)
     load(app_engine, CODES)
     activate(app_engine, owner, "2027.1")
-    open_source(app_engine, owner, "HMRC-CBAM-GOODS-SCOPE")
+    open_source(app_engine, owner, "FA2026-SCH16")
 
     def lookup(code: str) -> dict | None:  # type: ignore[type-arg]
         with session(app_engine) as s:
             return service.get_by_prefix(s, "cbam_commodity_codes", code, on=ON)
+
+    def in_scope(code: str) -> bool | None:
+        row = lookup(code)
+        return None if row is None else bool(row["in_scope"])
 
     hydrogen = lookup(
         "2804100000"
@@ -88,10 +93,41 @@ def test_goods_lookups_match_the_examples_printed_by_hmrc(
     assert cement and cement["in_scope"] and cement["code_prefix"] == "252329"
     steel = lookup("7208100000")  # under heading 72
     assert steel and steel["in_scope"] and steel["code_prefix"] == "72"
-    scrap = lookup("7204100000")  # HMRC lists "Except 7204"
+    scrap = lookup("7204100000")  # Sch 16 / HMRC: "Except 7204"
     assert scrap and scrap["in_scope"] is False and scrap["exclusion_within"] == "72"
     mixed = lookup("3105600000")  # "Except 3105 60 within 3105"
     assert mixed and mixed["in_scope"] is False
     other = lookup("3105100000")
     assert other and other["in_scope"] and other["code_prefix"] == "3105"
     assert lookup("9999000000") is None
+
+    # ferro-alloys: some in scope, some excepted from heading 72
+    for code in ("7202110000", "7202410000"):
+        assert in_scope(code) is True, code
+    for code in ("7202210000", "7202800000", "7202991000", "7202993000", "7202998000"):
+        assert in_scope(code) is False, code
+    # aluminium waste and other headings HMRC and Sch 16 do not list
+    assert in_scope("7602000000") is None and in_scope("7615100000") is None
+    assert in_scope("2507002000") is None and lookup("2507008000")["sector"] == "cement"  # type: ignore[index]
+    assert in_scope("2834290000") is None and in_scope("2808000000") is True
+    # a code too short to decide is refused, never guessed
+    with session(app_engine) as s:
+        for short in ("7202", "720299", "72"):
+            with pytest.raises(RuleBlockedError, match="too short"):
+                service.get_by_prefix(s, "cbam_commodity_codes", short, on=ON)
+        assert service.get_by_prefix(s, "cbam_commodity_codes", "7204", on=ON)["in_scope"] is False  # type: ignore[index]
+
+
+def test_the_goods_list_is_not_served_before_1_january_2027_uk_date(
+    app_engine: Engine, admin_engine: Engine
+) -> None:
+    owner = make_owner(app_engine, admin_engine)
+    load(app_engine, CODES)
+    activate(app_engine, owner, "2027.1")
+    open_source(app_engine, owner, "FA2026-SCH16", commencement_date=date(2027, 1, 1))
+    with session(app_engine) as s:
+        before = service.get_by_prefix(
+            s, "cbam_commodity_codes", "7601100000", on=date(2026, 12, 31)
+        )
+        after = service.get_by_prefix(s, "cbam_commodity_codes", "7601100000", on=date(2027, 1, 1))
+    assert before is None and after is not None

@@ -26,6 +26,13 @@ class SourceStatusIn(BaseModel):
     status: Literal["laid", "in_force", "commenced", "superseded"]
     reason: str = Field(min_length=1, max_length=2000)
     commencement_date: date | None = None
+    effective_to: date | None = None  # required when superseding: the day it stopped applying
+
+
+class ActivateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reason: str = Field(min_length=1, max_length=2000)
+    acknowledge_warnings: bool = False
 
 
 class DatasetOut(BaseModel):

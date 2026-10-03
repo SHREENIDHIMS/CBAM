@@ -132,8 +132,12 @@ notes: "Transcribed by <name>; checked by domain owner <name> on <date>"
   registry is the authority and the manifest's `source_status` is ignored, so reloading a
   folder is always a no-op.
 - A dataset version only drives decisions when it is `active` **and** its source is
-  `in_force`/`commenced` on the transaction date (`v_active_*` views). Activating a version
-  needs a current impact report; the previous active version is retired, never deleted.
+  `in_force`/`commenced` on the transaction date, or `superseded` for dates before its
+  `effective_to` (`v_active_*` views). Activating a version needs a current impact report, a
+  reason, and an acknowledgement when the report has warnings; the previous active version is
+  retired, never deleted. Row periods must lie inside the manifest's period.
+- `get_by_prefix` refuses a code that is too short to decide (listed codes below it differ).
+  The loader refuses a prefix list whose exceptions do not sit under a listed in-scope code.
 - `cbam_commodity_codes` lists headings and sub-headings exactly as HMRC publishes them
   (`code_prefix` = digits only). Everything below a listed code is covered, so the lookup is the
   longest matching prefix (`refdata.get_by_prefix`); "Except" rows have `in_scope=false`.

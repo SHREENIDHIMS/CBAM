@@ -53,15 +53,45 @@ def bootstrap(engine: Engine, *, user_id: UUID, email: str, now: datetime) -> bo
         return inserted is not None
 
 
+def revoke(engine: Engine, *, user_id: UUID, now: datetime) -> bool:
+    """Returns True if the person was a domain owner and no longer is."""
+    with tenant_session(engine, tenant_id=None, platform=True) as s:
+        s.execute(text("set local role cbam_owner"))
+        removed = s.execute(
+            text("delete from cbam.platform_domain_owners where user_id = :i returning user_id"),
+            {"i": user_id},
+        ).first()
+        if removed is not None:
+            record(
+                s,
+                tenant_id=None,
+                actor_type="system",
+                actor_id=None,
+                action="domain_owner.revoked",
+                object_type="user",
+                object_id=user_id,
+                occurred_at=now,
+                reason="domain owner revoked from the command line",
+            )
+        return removed is not None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Register a domain owner")
     parser.add_argument("--user-id", required=True, type=UUID)
-    parser.add_argument("--email", required=True)
+    parser.add_argument("--email", help="required to register; not needed with --revoke")
+    parser.add_argument("--revoke", action="store_true", help="remove the role instead")
     args = parser.parse_args(argv)
+    if not args.revoke and not args.email:
+        parser.error("--email is required unless --revoke is given")
     url = os.environ.get("MIGRATIONS_DATABASE_URL")
     if not url:
         print("MIGRATIONS_DATABASE_URL is not set", file=sys.stderr)
         return 2
+    if args.revoke:
+        done = revoke(make_engine(url), user_id=args.user_id, now=datetime.now(UTC))
+        print("domain owner revoked" if done else "was not a domain owner")
+        return 0
     try:
         created = bootstrap(
             make_engine(url), user_id=args.user_id, email=args.email, now=datetime.now(UTC)

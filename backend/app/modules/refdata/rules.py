@@ -16,12 +16,14 @@ RULE_SOURCE_ACTIVE = "R1-050.source_activation"
 RULE_SOURCE_STATUS = "R2-020.source_status"
 RULE_VERSION = "1"
 
-ACTIVE_SOURCE_STATUSES = frozenset({"in_force", "commenced"})
+# `superseded` still serves the dates before its effective_to, so earlier decisions replay
+# (CLAUDE.md rule 4); it always has an end date (database constraint).
+ACTIVE_SOURCE_STATUSES = frozenset({"in_force", "commenced", "superseded"})
 
 # One-way: a source is never moved back to draft; a mistake is fixed by superseding it.
 _SOURCE_TRANSITIONS: dict[str, frozenset[str]] = {
-    "draft": frozenset({"laid", "in_force", "commenced", "superseded"}),
-    "laid": frozenset({"in_force", "commenced", "superseded"}),
+    "draft": frozenset({"laid", "in_force", "commenced"}),
+    "laid": frozenset({"in_force", "commenced"}),
     "in_force": frozenset({"superseded"}),
     "commenced": frozenset({"superseded"}),
     "superseded": frozenset(),
@@ -46,6 +48,8 @@ def source_usable(
 
     if status not in ACTIVE_SOURCE_STATUSES:
         return decide("NOT_ACTIVE", f"source status is {status}; only in_force or commenced counts")
+    if status == "superseded" and effective_to is None:
+        return decide("NOT_ACTIVE", "a superseded source without an end date serves nothing")
     if commencement_date is not None and on < commencement_date:
         return decide("NOT_ACTIVE", f"source commences on {commencement_date.isoformat()}")
     if effective_from is not None and on < effective_from:
@@ -187,3 +191,23 @@ def diff_versions(
     return VersionDiff(
         changes=tuple(changes), unchanged=unchanged, coverage_gaps=tuple(_gaps(old, new, key))
     )
+
+
+def prefix_list_problems(rows: Sequence[Row], column: str) -> list[str]:
+    """Checks that make longest-prefix matching equal to the published rule "within a listed
+    code, and not within an excepted code" (FA 2026 Sch 16 para 1): every exception sits under
+    a listed in-scope code that it names, and nothing in scope sits under an exception."""
+    listed = [str(r[column]) for r in rows if r["in_scope"]]
+    excepted = [str(r[column]) for r in rows if not r["in_scope"]]
+    problems: list[str] = []
+    for number, row in enumerate(rows, start=2):
+        code = str(row[column])
+        if not row["in_scope"]:
+            parent = row.get("exclusion_within")
+            if not parent or not code.startswith(str(parent)) or str(parent) not in listed:
+                problems.append(
+                    f"row {number}: exception {code} must sit under a listed in-scope code"
+                )
+        elif any(code.startswith(e) for e in excepted):
+            problems.append(f"row {number}: in-scope {code} sits under an exception")
+    return problems

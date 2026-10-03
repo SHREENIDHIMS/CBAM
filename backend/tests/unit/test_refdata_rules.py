@@ -25,7 +25,7 @@ def usable(**kw: object) -> str:
     return rules.source_usable(**args).outcome  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("status", ["draft", "laid", "superseded"])
+@pytest.mark.parametrize("status", ["draft", "laid"])
 def test_only_in_force_or_commenced_sources_are_active(status: str) -> None:
     assert usable(status=status) == "NOT_ACTIVE"
 
@@ -120,3 +120,28 @@ def test_no_gap_when_the_new_version_covers_the_old_period() -> None:
     old = [row("72", "Iron", "2027-01-01")]
     new = [row("72", "Iron", "2027-01-01", "2027-07-01"), row("72", "Iron", "2027-07-01")]
     assert rules.diff_versions(old, new, key=KEY, columns=COLS).coverage_gaps == ()
+
+
+def test_a_superseded_source_serves_only_the_dates_before_its_end() -> None:
+    assert usable(status="superseded", effective_to=date(2027, 6, 2)) == "ACTIVE"
+    assert usable(status="superseded", effective_to=D) == "NOT_ACTIVE"
+    assert usable(status="superseded") == "NOT_ACTIVE"  # no end date: serves nothing
+
+
+def test_only_a_source_that_was_in_force_can_be_superseded() -> None:
+    assert rules.source_status_decision("in_force", "superseded", reason="x").outcome == "ALLOWED"
+    assert rules.source_status_decision("draft", "superseded", reason="x").outcome == "BLOCKED"
+    assert rules.source_status_decision("laid", "superseded", reason="x").outcome == "BLOCKED"
+
+
+def test_prefix_lists_need_exceptions_under_listed_codes() -> None:
+    def r(code: str, in_scope: bool, within: str | None = None) -> dict[str, object]:
+        return {"code": code, "in_scope": in_scope, "exclusion_within": within}
+
+    good = [r("72", True), r("7204", False, "72")]
+    assert rules.prefix_list_problems(good, "code") == []
+    assert rules.prefix_list_problems([r("7204", False, "72")], "code")  # parent not listed
+    assert rules.prefix_list_problems([r("72", True), r("7204", False, "73")], "code")
+    assert rules.prefix_list_problems(
+        [*good, r("720499", True)], "code"
+    )  # in scope under exception

@@ -9,4 +9,4 @@ fixture: true
 effective_from: 2028-01-01
 effective_to: null
 checksum_sha256: ba8c6588f2250be5c1e9ace128dc70ca4a4579ab26290e8bd31a38a854a6e330
-notes: "Fixture only (test data, not law)."
+notes: "Fixture only (test data, not law). Invented calendar for the fictional jurisdiction GB-FIXTURE; the real calendar is open (REG-DEC-016)."

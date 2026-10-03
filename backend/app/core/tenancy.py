@@ -190,16 +190,28 @@ def require_refdata(
     ) -> PlatformContext:
         with tenant_session(engine, tenant_id=None, user_id=user.user_id) as s:
             owner = s.execute(
-                text("select 1 from cbam.platform_domain_owners where user_id = :u"),
+                text(
+                    "select 1 from cbam.platform_domain_owners o"
+                    " join cbam.users u on u.id = o.user_id"
+                    " where o.user_id = :u and u.status = 'active'"
+                ),
                 {"u": user.user_id},
             ).scalar_one_or_none()
             admin = s.execute(
-                text("select 1 from cbam.platform_admins where user_id = :u"), {"u": user.user_id}
+                text(
+                    "select 1 from cbam.platform_admins a join cbam.users u on u.id = a.user_id"
+                    " where a.user_id = :u and u.status = 'active'"
+                ),
+                {"u": user.user_id},
             ).scalar_one_or_none()
         perms: frozenset[str] = frozenset()
         if owner is not None:
             perms = permissions_for(["domain_owner"])
-        elif admin is not None and permission == "refdata:read":
+        elif (
+            admin is not None
+            and permission == "refdata:read"
+            and "platform:refdata_read" in ROLE_PERMISSIONS["platform_admin"]
+        ):
             perms = frozenset({"refdata:read"})
         if permission not in perms:
             raise NotPermittedError(

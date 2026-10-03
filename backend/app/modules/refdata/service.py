@@ -83,18 +83,37 @@ def get(
 
 def get_by_prefix(session: Session, dataset: str, value: str, *, on: date) -> dict[str, Any] | None:
     """The usable row whose listed prefix is the longest prefix of `value` (a commodity
-    code, digits only). HMRC lists headings and sub-headings and covers everything below them."""
+    code, digits only). HMRC lists headings and sub-headings and covers everything below them.
+
+    A code that is too short to decide is refused, never guessed: if a listed row below `value`
+    would give a different answer (for example `7202` when `7202 21` is excepted from `72`), the
+    caller must pass the full commodity code.
+    """
     spec = _spec(dataset)
     if spec.prefix_column is None:
         raise InvalidRequestError(f"{dataset} has no prefix lookup")
     if not value.isdigit():
         raise InvalidRequestError("a prefix lookup needs digits only")
+    column = spec.prefix_column
     sql = (
         f"select * from cbam.{spec.view} where {_USABLE}"  # noqa: S608
-        f" and :value like {spec.prefix_column} || '%'"
-        f" order by length({spec.prefix_column}) desc limit 1"
+        f" and :value like {column} || '%'"
+        f" order by length({column}) desc limit 1"
     )
     row = session.execute(text(sql), {"on": on, "value": value}).mappings().first()
+    below_sql = (
+        f"select 1 from cbam.{spec.view} where {_USABLE}"  # noqa: S608
+        f" and {column} like :value || '%' and {column} <> :value"
+        " and in_scope is distinct from :scope limit 1"
+    )
+    scope = None if row is None else row["in_scope"]
+    differs = session.execute(
+        text(below_sql), {"on": on, "value": value, "scope": scope}
+    ).scalar_one_or_none()
+    if differs is not None:
+        raise RuleBlockedError(
+            f"Commodity code {value} is too short to decide: listed codes below it differ"
+        )
     return _clean(dict(row)) if row else None
 
 
@@ -207,6 +226,7 @@ def set_source_status(
     status: str,
     reason: str | None,
     commencement_date: date | None = None,
+    effective_to: date | None = None,
 ) -> dict[str, Any]:
     """A domain owner moves a source forward (for example laid -> in_force) with a reason."""
     _require_domain_owner(session, actor)
@@ -219,6 +239,10 @@ def set_source_status(
     if decision.outcome == "REASON_REQUIRED":
         raise ReasonRequiredError(decision.reason, rule_id=decision.rule_id)
     values: dict[str, Any] = {"status": status}
+    if status == "superseded":
+        if effective_to is None:
+            raise InvalidRequestError("Say the date the source stopped applying (effective_to)")
+        values["effective_to"] = effective_to
     if commencement_date is not None:
         values["commencement_date"] = commencement_date
     update_versioned(
@@ -240,10 +264,12 @@ def set_source_status(
         before={
             "status": current["status"],
             "commencement_date": _jsonable(current["commencement_date"]),
+            "effective_to": _jsonable(current["effective_to"]),
         },
         after={
             "status": status,
             "commencement_date": _jsonable(commencement_date or current["commencement_date"]),
+            "effective_to": _jsonable(effective_to or current["effective_to"]),
         },
         reason=reason,
     )
@@ -393,7 +419,8 @@ def build_impact_report(
     }
     session.execute(
         text(
-            "update cbam.ref_dataset_versions set impact_report = cast(:r as jsonb) where id = :i"
+            "update cbam.ref_dataset_versions set impact_report = cast(:r as jsonb),"
+            " row_version = row_version + 1, updated_at = now() where id = :i"
         ),
         {"r": dumps(report), "i": target["id"]},
     )
@@ -423,6 +450,8 @@ def activate_version(
     *,
     expected_version: int,
     app_env: str,
+    reason: str,
+    acknowledge_warnings: bool = False,
 ) -> dict[str, Any]:
     """A domain owner activates a pending version; the previous active one is retired.
 
@@ -443,6 +472,10 @@ def activate_version(
         )
     if target["is_fixture"] and app_env == "production":
         raise RuleBlockedError("Fixture datasets cannot be activated in production")
+    if not reason.strip():
+        raise ReasonRequiredError("Say why this version is being activated")
+    if target["row_count"] == 0:
+        raise RuleBlockedError("An empty dataset version cannot be activated")
     report = target["impact_report"]
     active = _active_version(session, dataset)
     if report is None:
@@ -452,6 +485,30 @@ def activate_version(
         raise RuleBlockedError(
             "The active version changed after the impact report; generate it again"
         )
+    if report.get("warnings") and not acknowledge_warnings:
+        raise RuleBlockedError(
+            "The impact report has warnings; read them and confirm to activate anyway"
+        )
+    update_versioned(
+        session,
+        "ref_dataset_versions",
+        row_id=target["id"],
+        expected_version=expected_version,
+        values={"status": "active", "activated_by": actor.user_id, "activated_at": now},
+    )
+    record(
+        session,
+        tenant_id=None,
+        actor_type="user",
+        actor_id=actor.user_id,
+        action="refdata.version_activated",
+        object_type="ref_dataset_version",
+        object_id=target["id"],
+        occurred_at=now,
+        before={"status": "pending"},
+        after={"status": "active", "dataset": dataset, "version": version},
+        reason=reason.strip(),
+    )
     if active is not None:
         retired_row = session.execute(
             text("select row_version from cbam.ref_dataset_versions where id = :i"),
@@ -476,24 +533,4 @@ def activate_version(
             before={"status": "active"},
             after={"status": "retired", "replaced_by": version},
         )
-    update_versioned(
-        session,
-        "ref_dataset_versions",
-        row_id=target["id"],
-        expected_version=expected_version,
-        values={"status": "active", "activated_by": actor.user_id, "activated_at": now},
-    )
-    record(
-        session,
-        tenant_id=None,
-        actor_type="user",
-        actor_id=actor.user_id,
-        action="refdata.version_activated",
-        object_type="ref_dataset_version",
-        object_id=target["id"],
-        occurred_at=now,
-        before={"status": "pending"},
-        after={"status": "active", "dataset": dataset, "version": version},
-        reason="Impact report reviewed",
-    )
     return get_version(session, dataset, version)

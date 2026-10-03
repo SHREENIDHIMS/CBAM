@@ -41,6 +41,13 @@ class Manifest(BaseModel):
             raise ValueError("checksum_sha256 must be 64 lowercase hex characters")
         return value
 
+    @field_validator("source_url")
+    @classmethod
+    def _https(cls, value: str | None) -> str | None:
+        if value is not None and not value.startswith("https://"):
+            raise ValueError("source_url must be an https:// address")
+        return value
+
     @field_validator("version", mode="before")
     @classmethod
     def _version_is_text(cls, value: object) -> object:

@@ -10,6 +10,7 @@ from app.core.tenancy import PlatformContext, require_refdata
 from app.core.versioning import etag, parse_if_match
 from app.modules.refdata import service
 from app.modules.refdata.schemas import (
+    ActivateIn,
     DatasetOut,
     SourceOut,
     SourceStatusIn,
@@ -21,7 +22,6 @@ from app.modules.refdata.service import Actor
 router = APIRouter(prefix="/platform", tags=["reference data"])
 
 Read = Annotated[PlatformContext, Depends(require_refdata("refdata:read"))]
-Prepare = Annotated[PlatformContext, Depends(require_refdata("refdata:activate"))]
 Decide = Annotated[PlatformContext, Depends(require_refdata("refdata:activate", recent_auth=True))]
 Now = Annotated[Clock, Depends(get_clock)]
 
@@ -60,6 +60,7 @@ def set_source_status(
             status=body.status,
             reason=body.reason,
             commencement_date=body.commencement_date,
+            effective_to=body.effective_to,
         )
     response.headers["ETag"] = etag(source["row_version"])
     return source
@@ -86,7 +87,7 @@ def get_version(dataset: str, version: str, response: Response, ctx: Read) -> di
 
 
 @router.post("/datasets/{dataset}/versions/{version}/impact")
-def impact_report(dataset: str, version: str, ctx: Prepare, clock: Now) -> dict[str, Any]:
+def impact_report(dataset: str, version: str, ctx: Decide, clock: Now) -> dict[str, Any]:
     """Dry run only: stores the report on the pending version, changes no reference data."""
     with ctx.session() as s:
         return service.build_impact_report(
@@ -98,6 +99,7 @@ def impact_report(dataset: str, version: str, ctx: Prepare, clock: Now) -> dict[
 def activate(
     dataset: str,
     version: str,
+    body: ActivateIn,
     response: Response,
     ctx: Decide,
     clock: Now,
@@ -114,6 +116,8 @@ def activate(
             version,
             expected_version=expected,
             app_env=settings.app_env,
+            reason=body.reason,
+            acknowledge_warnings=body.acknowledge_warnings,
         )
     response.headers["ETag"] = etag(activated["row_version"])
     return activated

@@ -63,11 +63,11 @@ export function useActivate(dataset: string) {
   const api = useApi()
   const refresh = useRefresh()
   return useMutation({
-    mutationFn: (version: DatasetVersion) =>
+    mutationFn: (input: { version: DatasetVersion; reason: string; acknowledge: boolean }) =>
       api.post<DatasetVersion>(
-        `/platform/datasets/${dataset}/versions/${encodeURIComponent(version.version)}/activate`,
-        {},
-        { rowVersion: version.row_version },
+        `/platform/datasets/${dataset}/versions/${encodeURIComponent(input.version.version)}/activate`,
+        { reason: input.reason, acknowledge_warnings: input.acknowledge },
+        { rowVersion: input.version.row_version },
       ),
     onSettled: refresh,
   })

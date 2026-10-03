@@ -72,12 +72,17 @@ const report: ImpactReport = {
 }
 
 function fakeApi(state: { version: DatasetVersion }) {
-  const calls: { method: string; url: string; ifMatch: string | null }[] = []
+  const calls: { method: string; url: string; ifMatch: string | null; body?: unknown }[] = []
   const handler: Handler = (url, init) => {
     const method = init?.method ?? 'GET'
     const path = url.replace('/api/v1', '')
     if (path.startsWith('/platform/')) {
-      calls.push({ method, url: path, ifMatch: new Headers(init?.headers).get('if-match') })
+      calls.push({
+        method,
+        url: path,
+        ifMatch: new Headers(init?.headers).get('if-match'),
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      })
     }
     if (path === '/platform/datasets') return json([dataset])
     if (path === '/platform/sources') return json([source])
@@ -156,6 +161,8 @@ describe('reference data screens', () => {
     const activate = await screen.findByRole('button', { name: 'Activate version 2027.1' })
     expect(activate).toBeDisabled()
     await userEvent.click(screen.getByLabelText(/I have read the impact report/))
+    expect(activate).toBeDisabled() // a reason is still needed
+    await userEvent.type(screen.getByLabelText('Why are you activating this version?'), 'Checked')
     expect(activate).toBeEnabled()
     await userEvent.click(activate)
 
@@ -163,6 +170,7 @@ describe('reference data screens', () => {
       expect(calls.find((c) => c.url.endsWith('/activate'))).toMatchObject({
         method: 'POST',
         ifMatch: '"1"',
+        body: { reason: 'Checked', acknowledge_warnings: true },
       }),
     )
   })
@@ -177,6 +185,7 @@ describe('reference data screens', () => {
     renderApp('/ops/reference-data/cbam_commodity_codes', { me: owner, handler: refusing })
     await userEvent.click(await screen.findByRole('button', { name: 'Review 2027.1' }))
     await userEvent.click(await screen.findByLabelText(/I have read the impact report/))
+    await userEvent.type(screen.getByLabelText('Why are you activating this version?'), 'Checked')
     await userEvent.click(screen.getByRole('button', { name: 'Activate version 2027.1' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('The active version changed')
   })

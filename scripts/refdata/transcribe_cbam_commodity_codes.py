@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Rebuild backend/refdata/cbam_commodity_codes/<version>/ from HMRC's goods-in-scope pages.
 
-Source: "Check which goods are in scope of Carbon Border Adjustment Mechanism (CBAM)" and its five
-sector pages, read through the GOV.UK content API. The script only copies what HMRC published;
+Source: HMRC's "Check which goods are in scope of Carbon Border Adjustment Mechanism (CBAM)" and its
+five sector pages, read through the GOV.UK content API. The legal source recorded for the data is
+FA 2026 s.143(2) and Sch 16 (the regulatory analyst found the same codes there). The script only copies what HMRC published;
 a domain owner checks the result before anything is activated (CLAUDE.md rule 15, GOV-DEC-009).
 
     python3 scripts/refdata/transcribe_cbam_commodity_codes.py 2027.1 --retrieved 2026-10-03
@@ -60,7 +61,7 @@ def tables(body: str) -> list[list[list[str]]]:
     found = []
     for table in re.findall(r"<table.*?</table>", body, re.S):
         rows = []
-        for tr in re.findall(r"<tr>(.*?)</tr>", table, re.S):
+        for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", table, re.S):
             cells = [clean(c) for c in re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", tr, re.S)]
             rows.append(cells[:3])
         found.append(rows)
@@ -125,26 +126,29 @@ def main() -> None:
     (folder / "manifest.yaml").write_text(
         f"""dataset: cbam_commodity_codes
 version: "{args.version}"
-source_id: HMRC-CBAM-GOODS-SCOPE
-source_title: "Check which goods are in scope of Carbon Border Adjustment Mechanism (CBAM)"
-source_type: guidance
-source_url: https://www.gov.uk/government/publications/{INDEX}
-publication_date: {published}
+source_id: FA2026-SCH16
+source_title: "Finance Act 2026, section 143(2) and Schedule 16 (CBAM goods)"
+source_type: legislation
+source_url: https://www.legislation.gov.uk/ukpga/2026/11/schedule/16
+commencement_date: 2027-01-01
 retrieved_at: {args.retrieved}
-source_status: draft
+source_status: laid
 effective_from: 2027-01-01
 effective_to: null
 checksum_sha256: {checksum}
 fixture: false
 notes: >-
   Copied by scripts/refdata/transcribe_cbam_commodity_codes.py from the five HMRC sector pages
-  (GOV.UK content API, pages last updated {published}). NOT YET CHECKED by the domain owner.
-  The source stays draft in the registry until the domain owner confirms the legal basis of the
-  list and sets its status (GOV-DEC-009, REG-DEC-018); this version stays pending until then.
-  HMRC lists headings and sub-headings and says everything below a listed code is in scope, so
-  lookups use the longest listed prefix. "Except" rows are the codes HMRC lists as not liable.
-  For "Except 7204" HMRC gives no parent; it is stored within 72 (the only listed iron and steel
-  code that covers it).
+  (GOV.UK content API, pages last updated {published}); the regulatory analyst compared the
+  codes with the goods table in FA 2026 Sch 16 para 1 (s.143(2) says a CBAM good is one specified
+  by that Schedule; s.158(1): effect for goods imported on or after 1 January 2027) and found
+  the same codes. Descriptions are HMRC's wording, not the statute's. NOT YET CHECKED by the
+  domain owner. The source is registered `laid`; the domain owner sets it in force once she has
+  confirmed the legal basis and that no regulations under Sch 16 para 2(3) changed the table
+  (GOV-DEC-009, REG-DEC-018). This version stays pending until then. HMRC lists headings and
+  sub-headings, and Sch 16 says goods within a listed code other than those the table excepts, so
+  lookups use the longest listed prefix and the loader checks that every exception sits under a
+  listed code. "Except 7204" has no parent on HMRC's page; it is stored within 72, as Sch 16 puts it.
 """
     )
     print(f"{len(all_rows)} rows -> {folder} (sha256 {checksum[:12]}...)")  # noqa: T201

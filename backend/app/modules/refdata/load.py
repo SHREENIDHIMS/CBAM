@@ -21,6 +21,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import Engine, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.core.audit import record
@@ -61,7 +62,10 @@ def _parse_value(column: Column, raw: str) -> Any:
         case "text":
             return value
         case "int":
-            return int(value)
+            number = int(value)
+            if not -(2**31) <= number < 2**31:
+                raise ValueError("number out of range")
+            return number
         case "bool":
             if value.lower() in _TRUE:
                 return True
@@ -72,12 +76,27 @@ def _parse_value(column: Column, raw: str) -> Any:
             return date.fromisoformat(value)
         case "decimal":
             try:
-                return Decimal(value)
+                number_ = Decimal(value)
             except InvalidOperation as exc:
                 raise ValueError("not a decimal number") from exc
+            if not number_.is_finite():
+                raise ValueError("not a finite decimal number")
+            return number_
         case "json":
             return json.loads(value)
     raise AssertionError(column.kind)  # pragma: no cover
+
+
+def _period_errors(number: int, row: dict[str, Any], manifest: Manifest) -> list[str]:
+    start, end = row["effective_from"], row["effective_to"]
+    if end is not None and end <= start:
+        return [f"row {number}: effective_to must be after effective_from"]
+    outside = start < manifest.effective_from or (
+        manifest.effective_to is not None and (end is None or end > manifest.effective_to)
+    )
+    if outside:
+        return [f"row {number}: period lies outside the manifest's effective period"]
+    return []
 
 
 def parse_rows(spec: DatasetSpec, manifest: Manifest, raw: bytes) -> list[dict[str, Any]]:
@@ -119,12 +138,13 @@ def parse_rows(spec: DatasetSpec, manifest: Manifest, raw: bytes) -> list[dict[s
                 parsed[name] = date.fromisoformat(cell) if cell else default
             except ValueError:
                 row_errors.append(f"row {number}, {name}: not an ISO date")
-        if not row_errors and parsed["effective_to"] is not None:
-            if parsed["effective_to"] <= parsed["effective_from"]:
-                row_errors.append(f"row {number}: effective_to must be after effective_from")
+        if not row_errors:
+            row_errors.extend(_period_errors(number, parsed, manifest))
         errors.extend(row_errors)
         if not row_errors:
             rows.append(parsed)
+    if not errors and spec.prefix_column is not None:
+        errors.extend(rules.prefix_list_problems(rows, spec.prefix_column))
     if not errors:
         for first, second in rules.find_overlaps(rows, spec.key):
             errors.append(
@@ -154,11 +174,28 @@ def _ensure_source(
     session: Session, manifest: Manifest, now: datetime, *, audit_actor: UUID | None
 ) -> UUID:
     existing = session.execute(
-        text("select id from cbam.regulatory_sources where source_id = :s"),
+        text(
+            "select id, title, source_type, url, publication_date from cbam.regulatory_sources"
+            " where source_id = :s"
+        ),
         {"s": manifest.source_id},
-    ).scalar_one_or_none()
+    ).one_or_none()
     if existing is not None:
-        return UUID(str(existing))  # the registry is the authority, not the manifest
+        # The registry is the authority, but a manifest that describes the source differently
+        # is a mistake (or a fixture borrowing a real source id); say so instead of ignoring it.
+        declared = (
+            manifest.source_title,
+            manifest.source_type,
+            manifest.source_url,
+            manifest.publication_date,
+        )
+        stored = (existing.title, existing.source_type, existing.url, existing.publication_date)
+        if declared != stored:
+            raise RuleBlockedError(
+                f"Source {manifest.source_id} is already registered with different details; "
+                "fix the manifest or use another source id"
+            )
+        return UUID(str(existing.id))
     source_pk = uuid7()
     session.execute(
         text(
@@ -355,6 +392,9 @@ def main(argv: list[str] | None = None) -> int:
             result = load_folder(engine, Path(arg), clock=SystemClock(), app_env=settings.app_env)
         except (InvalidRequestError, RuleBlockedError) as exc:
             print(f"refused {arg}: {exc.detail}", file=sys.stderr)
+            return 1
+        except DBAPIError as exc:
+            print(f"refused {arg}: the database rejected it: {exc.orig}", file=sys.stderr)
             return 1
         print(
             f"{result.status}: {result.dataset} {result.version} ({result.row_count} rows, pending)"

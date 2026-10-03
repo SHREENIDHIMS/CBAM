@@ -10,7 +10,8 @@ and the business columns. Rows are inserted only into a pending version and neve
 phases add columns as their requirements need them.
 
 `v_active_<dataset>` is the one place the source activation rule lives (docs/DATABASE.md
-section 5): version `active` AND source `in_force`/`commenced`. The date part is exposed as
+section 5): version `active` AND source `in_force`/`commenced`, or `superseded` for the dates
+before its `effective_to` (a superseded source always has one, so replays of earlier dates work). The date part is exposed as
 `usable_from`/`usable_to` (row period narrowed by the source's commencement and effective
 period), and services filter on the legal date.
 """
@@ -169,7 +170,7 @@ def _create(name: str, columns: str, key: tuple[str, ...]) -> str:
     alter table {table} enable row level security;
     alter table {table} force row level security;
     create policy open_read on {table} for select using (true);
-    create policy open_insert on {table} for insert with check (true);
+    create policy platform_insert on {table} for insert with check (cbam.is_platform());
 
     create view cbam.v_active_{name} as
     select t.*,
@@ -181,7 +182,8 @@ def _create(name: str, columns: str, key: tuple[str, ...]) -> str:
     from {table} t
     join cbam.ref_dataset_versions v on v.id = t.dataset_version_id
     join cbam.regulatory_sources s on s.id = v.source_id
-    where v.status = 'active' and s.status in ('in_force','commenced');
+    where v.status = 'active' and s.status in ('in_force','commenced','superseded');
+    revoke insert, update, delete, truncate on cbam.v_active_{name} from cbam_app;
     """  # noqa: S608 - names come from the fixed list above
 
 

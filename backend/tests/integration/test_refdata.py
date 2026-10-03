@@ -95,6 +95,7 @@ def open_source(engine: Engine, owner: UUID, source_id: str = "TEST-SOURCE", **k
             status=str(kw.get("status", "in_force")),
             reason="Primary text read",
             commencement_date=kw.get("commencement_date"),  # type: ignore[arg-type]
+            effective_to=date(2027, 6, 1) if kw.get("status") == "superseded" else None,
         )
 
 
@@ -113,6 +114,8 @@ def activate(
             version,
             expected_version=current["row_version"],
             app_env="local",
+            reason="Reviewed the impact report",
+            acknowledge_warnings=True,
         )
 
 
@@ -343,6 +346,7 @@ def test_a_draft_source_cannot_drive_a_lookup_even_when_the_version_is_active(
         ("laid", ("in_force",), date(2027, 6, 2), date(2027, 6, 1), False),
         ("laid", ("in_force",), None, date(2026, 12, 31), False),  # before the row's period
         ("laid", ("in_force", "superseded"), None, date(2027, 6, 1), False),
+        ("laid", ("in_force", "superseded"), None, date(2027, 5, 31), True),  # replay works
     ],
 )
 def test_the_sql_view_and_the_pure_rule_agree(
@@ -365,12 +369,13 @@ def test_the_sql_view_and_the_pure_rule_agree(
         open_source(app_engine, owner, status=status)
     served = get_code(app_engine, "72", on) is not None
     current = scalar(app_engine, "select status from cbam.regulatory_sources")
+    ends = scalar(app_engine, "select effective_to from cbam.regulatory_sources")
     decision = rules.source_usable(
         source_id="TEST-SOURCE",
         status=str(current),
         commencement_date=commencement,
         effective_from=None,
-        effective_to=None,
+        effective_to=ends,  # type: ignore[arg-type]
         on=on,
     )
     row_open = on >= date(2027, 1, 1)  # the dataset's own effective_from
@@ -430,6 +435,8 @@ def test_activation_needs_an_impact_report_first(
                 "t.1",
                 expected_version=version["row_version"],
                 app_env="local",
+                reason="Reviewed the impact report",
+                acknowledge_warnings=True,
             )
 
 
@@ -451,6 +458,8 @@ def test_only_a_domain_owner_can_activate_or_set_a_source_status(
                 "t.1",
                 expected_version=version["row_version"],
                 app_env="local",
+                reason="Reviewed the impact report",
+                acknowledge_warnings=True,
             )
         with pytest.raises(NotPermittedError):
             service.set_source_status(
@@ -510,6 +519,8 @@ def test_activation_checks_the_row_version_and_the_status(
             "t.1",
             expected_version=99,
             app_env="local",
+            reason="Reviewed the impact report",
+            acknowledge_warnings=True,
         )
     activate(app_engine, owner, "t.1")
     with session(app_engine, owner) as s:
@@ -523,6 +534,8 @@ def test_activation_checks_the_row_version_and_the_status(
                 "t.1",
                 expected_version=version["row_version"],
                 app_env="local",
+                reason="Reviewed the impact report",
+                acknowledge_warnings=True,
             )
 
 
@@ -546,6 +559,8 @@ def test_a_stale_impact_report_blocks_activation(
                 "t.2",
                 expected_version=version["row_version"],
                 app_env="local",
+                reason="Reviewed the impact report",
+                acknowledge_warnings=True,
             )
 
 
@@ -566,6 +581,8 @@ def test_fixture_datasets_cannot_be_activated_in_production(
                 "t.1",
                 expected_version=version["row_version"],
                 app_env="production",
+                reason="Reviewed the impact report",
+                acknowledge_warnings=True,
             )
 
 

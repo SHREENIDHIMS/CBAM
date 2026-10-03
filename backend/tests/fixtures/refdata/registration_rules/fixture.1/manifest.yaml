@@ -8,5 +8,5 @@ source_status: laid
 fixture: true
 effective_from: 2027-01-01
 effective_to: null
-checksum_sha256: 2ca327cfaef8ceeb52079455d512b123cc3a98c6bbdaf9c93a6197236d731d49
-notes: "Fixture only (test data, not law). GAP_ANALYSIS section 12 C1 and C6 (SI 2026/830 reg 2(2); Sch 17 para 2(4))."
+checksum_sha256: 3816051984991cb91e9a4068e6dc3dd132e9fa6566a5f9aa0978002d3ca57756
+notes: "Fixture only (test data, not law). GAP_ANALYSIS section 12 C1 and C6: SI 2026/830 reg 2(2) gives 31 Jan 2028 only to persons who trigger in 2027, so the row ends on 1 Jan 2028; Sch 17 para 2(4) gives the 30 days."

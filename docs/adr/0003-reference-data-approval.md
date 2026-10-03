@@ -34,6 +34,29 @@ could otherwise make themselves an approver of global law.
 5. Activation needs a stored impact report made against the version that is active right now;
    if the active version changes first, the report must be generated again.
 
+6. Writing these tables needs a platform-mode session (row-level security), so a tenant
+   session cannot insert a source or version or forge an impact report. An impact report can be
+   recorded only by a domain owner, only on a pending version, and sealing follows: rows can no
+   longer be added once the report exists. The database refuses activation unless the report is
+   for that very version (id and checksum) and was compared with the version active at that
+   moment, and refuses an empty version.
+7. Activation needs a free-text reason (stored in the audit event) and, when the report has
+   warnings (a source not yet in force, coverage gaps, test data), an explicit acknowledgement.
+8. Source status is one-way in the database too (draft/laid forward, only an in-force source can be
+   superseded). A superseded source must carry the date it stopped applying and keeps serving
+   earlier dates, so historical decisions replay (CLAUDE.md rule 4). A source changes only
+   together with its status.
+9. A domain owner can be revoked (`bootstrap_domain_owner --revoke`, audited), and a disabled
+   account loses reference-data access immediately.
+
+## Residual risk
+
+"Domain owner" in the database is decided from `app.user_id`, which the application sets. Anyone
+holding the `cbam_app` database credentials (the API, worker or loader) can set it, exactly as
+they could set `app.tenant_id` for tenant row-level security. The triggers stop mistakes and
+application bugs, not a stolen app credential. Open item: a separate database role and credential
+for the loader (insert only) and for approvals, so the loader process cannot approve.
+
 ## Consequences
 
 - One more table and a CLI to run once per approver. The tenant `domain_owner` role still exists

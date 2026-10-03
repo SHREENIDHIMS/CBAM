@@ -147,9 +147,9 @@ the resulting token.
 | GET | `/platform/sources` · `/{id}` | Regulatory source registry |
 | GET | `/platform/datasets` · `/{id}/versions` | Datasets and versions |
 | GET | `/platform/datasets/{name}/versions/{v}` | One version with its stored impact report |
-| POST | `/platform/datasets/{name}/versions/{v}/impact` | Dry-run impact report (domain owner) |
-| POST | `/platform/datasets/{name}/versions/{v}/activate` | Activate (domain owner, recent login, `If-Match`); needs a current impact report |
-| POST | `/platform/sources/{id}/status` | Move a source forward, e.g. `laid` → `in_force`, with a reason (domain owner, recent login, `If-Match`) |
+| POST | `/platform/datasets/{name}/versions/{v}/impact` | Dry-run impact report; seals the version (domain owner, recent login) |
+| POST | `/platform/datasets/{name}/versions/{v}/activate` | Activate (domain owner, recent login, `If-Match`); body `{reason, acknowledge_warnings}`; needs a current impact report |
+| POST | `/platform/sources/{id}/status` | Move a source forward, e.g. `laid` → `in_force`, with a reason; `superseded` also needs `effective_to` (domain owner, recent login, `If-Match`) |
 
 Reference data is platform-wide. Reads need a platform admin or a registered **domain owner**;
 impact reports, activation and source status need a domain owner (the `platform_domain_owners`
