@@ -97,7 +97,7 @@ clock, money, decisions, tasks.
 13. - [x] Frontend: Supabase Auth sign-in, MFA enrolment + challenge, sign-out, password
     reset; app shell; `/me`; role-aware navigation; British English formatting helpers
     (`14 March 2027`, `£1,234.56`) with tests.
-14. - [ ] Platform admin screens: create tenant, invite users, assign roles (R1-001).
+14. - [x] Platform admin screens: create tenant, invite users, assign roles (R1-001).
 15. - [x] Structured logging (`structlog`) with request/tenant/user IDs, no PII.
 
 **Exit gate**

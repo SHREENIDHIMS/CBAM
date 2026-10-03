@@ -23,6 +23,13 @@ export function OpsHome() {
   return (
     <main className="mx-auto max-w-2xl p-6">
       <h1 className="mb-4 text-2xl font-semibold">Choose a client account</h1>
+      {platformAdmin && (
+        <p className="mb-4">
+          <Link className="underline" to="/ops/platform">
+            Platform administration
+          </Link>
+        </p>
+      )}
       {memberships.length === 0 ? (
         <p>
           {platformAdmin

@@ -49,9 +49,27 @@ export function me(overrides: Partial<Me> = {}): Me {
   }
 }
 
-export function renderApp(route: string, options: { auth?: AuthApi; me?: Me } = {}) {
+export type Handler = (url: string, init?: RequestInit) => Response | Promise<Response> | undefined
+
+export function json(body: unknown, status = 200): Response {
+  return new Response(status === 204 ? null : JSON.stringify(body), {
+    status,
+    headers: { 'content-type': status >= 400 ? 'application/problem+json' : 'application/json' },
+  })
+}
+
+export function problem(status: number, slug: string, detail?: string): Response {
+  return json({ type: `https://cbam.example/errors/${slug}`, title: slug, status, detail }, status)
+}
+
+export function renderApp(
+  route: string,
+  options: { auth?: AuthApi; me?: Me; handler?: Handler } = {},
+) {
   const auth = options.auth ?? fakeAuth()
-  const fetchImpl = vi.fn(async (url: string) => {
+  const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+    const custom = await options.handler?.(url, init)
+    if (custom) return custom
     if (url.endsWith('/me')) {
       return new Response(JSON.stringify(options.me ?? me()), {
         headers: { 'content-type': 'application/json' },

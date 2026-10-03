@@ -9,6 +9,9 @@ import { TasksPage } from './ops/pages/TasksPage'
 import { TenantHome } from './ops/pages/TenantHome'
 import { UpdatePassword } from './ops/pages/UpdatePassword'
 import { PortalHome } from './portal/PortalHome'
+import { ClientPage } from './ops/platform/ClientPage'
+import { ClientsPage } from './ops/platform/ClientsPage'
+import { PlatformShell } from './ops/platform/PlatformShell'
 import { RequireAuth } from './shared/auth/RequireAuth'
 
 export default function App() {
@@ -21,6 +24,10 @@ export default function App() {
         <Route path="/mfa/enrol" element={<MfaEnrol />} />
         <Route path="/mfa/challenge" element={<MfaChallenge />} />
         <Route path="/ops" element={<OpsHome />} />
+        <Route path="/ops/platform" element={<PlatformShell />}>
+          <Route index element={<ClientsPage />} />
+          <Route path="tenants/:tenantId" element={<ClientPage />} />
+        </Route>
         <Route path="/ops/t/:tenantId" element={<TenantShell />}>
           <Route index element={<TenantHome />} />
           <Route path="tasks" element={<TasksPage />} />
