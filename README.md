@@ -42,11 +42,15 @@ docker compose -f infra/docker-compose.yml up -d   # Redis
 
 cd backend
 uv sync
-uv run alembic upgrade head
-uv run python -m app.modules.refdata.load tests/fixtures/refdata   # fixture reference data
+# First migration creates the cbam_owner / cbam_app roles, so run it as the local
+# Supabase `postgres` user (default password `postgres`, port 54322):
+export MIGRATIONS_DATABASE_URL=postgresql+psycopg://postgres:postgres@127.0.0.1:54322/postgres
+uv run alembic upgrade head                        # PowerShell: $env:MIGRATIONS_DATABASE_URL="..."
+# Fixture reference-data loader arrives in Phase 2 (not available yet).
 uv run uvicorn app.main:app --reload               # API  http://localhost:8000
 uv run celery -A app.core.jobs worker -l info      # worker (new terminal)
 uv run celery -A app.core.jobs beat -l info        # scheduler (new terminal)
+# Windows: add --pool=solo to the worker, and run worker and beat separately (no -B).
 
 cd ../frontend
 npm ci
