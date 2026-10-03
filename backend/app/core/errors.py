@@ -137,7 +137,10 @@ def install_error_handlers(app: FastAPI, *, type_base: str) -> None:
         )
 
     async def unhandled_handler(request: Request, exc: Exception) -> JSONResponse:
-        _log.error("unhandled_error", error_type=type(exc).__name__, path=request.url.path)
+        try:
+            _log.error("unhandled_error", error_type=type(exc).__name__, path=request.url.path)
+        except Exception:
+            pass
         return _problem(
             request,
             type_base=type_base,

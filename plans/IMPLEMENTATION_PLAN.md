@@ -87,7 +87,7 @@ clock, money, decisions, tasks.
 7. - [ ] `core/permissions.py`: roles `platform_admin`, `operations`, `client_admin`,
    `reviewer`, `approver`, `supplier`, `tax_agent`, `domain_owner`; permission map;
    `require("perm")` dependency; permission-matrix test incl. tax-agent restrictions (R1-002).
-8. - [ ] `audit_events` table + append-only trigger + grants + hash chain; `core/audit.py`
+8. - [x] `audit_events` table + append-only trigger + grants + hash chain; `core/audit.py`
    `record()`; nightly chain-verify task; tests: UPDATE/DELETE as `cbam_app` fail (R1-023).
 9. - [ ] `core/decisions.py` + `decisions` table: canonical-JSON fingerprint, save, lookup.
 10. - [ ] `row_version` mixin + `If-Match` handling → 409 on mismatch (R1-045).
