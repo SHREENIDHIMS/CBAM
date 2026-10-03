@@ -159,3 +159,35 @@ def test_a_domain_owner_sets_a_source_in_force_with_a_reason(
         client.get(f"{P}/datasets/cbam_commodity_codes/versions/zzz", headers=h(owner)).status_code
         == 404
     )
+
+
+def test_me_says_whether_the_user_is_a_domain_owner(
+    client: TestClient, app_engine: Engine, admin_engine: Engine
+) -> None:
+    owner = make_owner(app_engine, admin_engine)
+    other = make_user(app_engine)
+    mine = client.get("/api/v1/me", headers=h(owner)).json()
+    assert (mine["domain_owner"], mine["mfa"]["required"]) == (True, True)
+    assert client.get("/api/v1/me", headers=h(other)).json()["domain_owner"] is False
+
+
+def test_bootstrap_registers_a_domain_owner_once(admin_engine: Engine) -> None:
+    from datetime import UTC, datetime
+
+    from app.cli.bootstrap_domain_owner import bootstrap
+    from app.core.ids import uuid7
+
+    uid = uuid7()
+    mail = f"owner-{uid.hex[:10]}@example.test"
+    now = datetime(2027, 3, 1, 9, 0, tzinfo=UTC)
+    assert bootstrap(admin_engine, user_id=uid, email=mail.upper(), now=now) is True
+    assert bootstrap(admin_engine, user_id=uid, email=mail, now=now) is False
+    with admin_engine.connect() as conn:
+        audited = conn.execute(
+            text(
+                "select count(*) from cbam.audit_events where tenant_id is null"
+                " and action = 'domain_owner.registered' and object_id = :u"
+            ),
+            {"u": uid},
+        ).scalar()
+    assert audited == 1

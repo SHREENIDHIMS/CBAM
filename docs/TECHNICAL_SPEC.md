@@ -105,18 +105,40 @@ backend/refdata/cbam_commodity_codes/2027.1/
 
 ```yaml
 dataset: cbam_commodity_codes
-version: "2027.1"
+version: "2027.1"                # quoted text
 source_id: HMRC-CBAM-GOODS-SCOPE
+source_title: "Check which goods are in scope of Carbon Border Adjustment Mechanism (CBAM)"
+source_type: guidance            # legislation | regulation | notice | system_boundary | guidance
 source_url: https://www.gov.uk/government/publications/check-which-goods-are-in-scope-of-carbon-border-adjustment-mechanism-cbam
-retrieved_at: 2026-10-01
-source_status: in_force          # draft | laid | in_force | commenced | superseded
+publication_date: 2026-07-16     # optional
+commencement_date: null          # optional; the source is not usable before it
+retrieved_at: 2026-10-03
+source_status: draft             # draft | laid ONLY (see below)
 effective_from: 2027-01-01
 effective_to: null
 checksum_sha256: <of data.csv>
+fixture: false                   # true = test data; refused in production
 notes: "Transcribed by <name>; checked by domain owner <name> on <date>"
 ```
 
-- Loader command: `uv run python -m app.modules.refdata.load <path>`.
+- `data.csv` is UTF-8 with exactly the dataset's columns (`app/modules/refdata/datasets.py`,
+  mirrors the migration). Optional `effective_from` / `effective_to` columns per row default
+  to the manifest's period. Empty cells are NULL only for optional columns. YAML data files
+  are not supported yet.
+- **The manifest never declares a source in force.** The loader registers a new source as
+  `draft` or `laid` only, and a manifest claiming `in_force`, `commenced` or `superseded` is
+  refused. A domain owner moves the source forward in the registry
+  (`POST /platform/sources/{id}/status`, with a reason). For a source that already exists, the
+  registry is the authority and the manifest's `source_status` is ignored, so reloading a
+  folder is always a no-op.
+- A dataset version only drives decisions when it is `active` **and** its source is
+  `in_force`/`commenced` on the transaction date (`v_active_*` views). Activating a version
+  needs a current impact report; the previous active version is retired, never deleted.
+- `cbam_commodity_codes` lists headings and sub-headings exactly as HMRC publishes them
+  (`code_prefix` = digits only). Everything below a listed code is covered, so the lookup is the
+  longest matching prefix (`refdata.get_by_prefix`); "Except" rows have `in_scope=false`.
+
+- Loader command: `uv run python -m app.modules.refdata.load <folder> [<folder> ...]`.
 - Same version + different checksum → refused. New content = new version folder.
 - Loaded versions start `pending`. Activation needs `domain_owner` approval after a
   dry-run impact report (R1-050).

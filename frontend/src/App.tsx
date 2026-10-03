@@ -12,6 +12,9 @@ import { PortalHome } from './portal/PortalHome'
 import { ClientPage } from './ops/platform/ClientPage'
 import { ClientsPage } from './ops/platform/ClientsPage'
 import { PlatformShell } from './ops/platform/PlatformShell'
+import { DatasetPage } from './ops/refdata/DatasetPage'
+import { RefDataShell } from './ops/refdata/RefDataShell'
+import { ReferenceDataPage } from './ops/refdata/ReferenceDataPage'
 import { RequireAuth } from './shared/auth/RequireAuth'
 
 export default function App() {
@@ -27,6 +30,10 @@ export default function App() {
         <Route path="/ops/platform" element={<PlatformShell />}>
           <Route index element={<ClientsPage />} />
           <Route path="tenants/:tenantId" element={<ClientPage />} />
+        </Route>
+        <Route path="/ops/reference-data" element={<RefDataShell />}>
+          <Route index element={<ReferenceDataPage />} />
+          <Route path=":dataset" element={<DatasetPage />} />
         </Route>
         <Route path="/ops/t/:tenantId" element={<TenantShell />}>
           <Route index element={<TenantHome />} />

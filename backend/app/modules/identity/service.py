@@ -15,6 +15,10 @@ def describe_user(engine: Engine, user: AuthenticatedUser) -> MeOut:
         is_admin = s.execute(
             text("select 1 from cbam.platform_admins where user_id = :u"), {"u": user.user_id}
         ).scalar_one_or_none()
+        is_domain_owner = s.execute(
+            text("select 1 from cbam.platform_domain_owners where user_id = :u"),
+            {"u": user.user_id},
+        ).scalar_one_or_none()
     memberships: list[MembershipOut] = []
     for row in rows:
         with tenant_session(engine, tenant_id=row.tenant_id, user_id=user.user_id) as s:
@@ -29,10 +33,15 @@ def describe_user(engine: Engine, user: AuthenticatedUser) -> MeOut:
                 mfa_required=mfa_required(roles),
             )
         )
-    needs_mfa = is_admin is not None or any(m.mfa_required for m in memberships)
+    needs_mfa = (
+        is_admin is not None
+        or is_domain_owner is not None
+        or any(m.mfa_required for m in memberships)
+    )
     return MeOut(
         user_id=user.user_id,
         platform_admin=is_admin is not None,
+        domain_owner=is_domain_owner is not None,
         memberships=memberships,
         mfa=MfaState(required=needs_mfa, passed=user.aal == "aal2"),
     )

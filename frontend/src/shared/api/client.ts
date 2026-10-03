@@ -33,7 +33,7 @@ type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
 export interface Api {
   get<T>(path: string): Promise<T>
   patch<T>(path: string, body: unknown, options: { rowVersion: number }): Promise<T>
-  post<T>(path: string, body: unknown): Promise<T>
+  post<T>(path: string, body: unknown, options?: { rowVersion: number }): Promise<T>
   delete(path: string): Promise<void>
 }
 
@@ -87,7 +87,7 @@ export function createApi(
   return {
     get: (path) => request('GET', path),
     patch: (path, body, { rowVersion }) => request('PATCH', path, body, rowVersion),
-    post: (path, body) => request('POST', path, body),
+    post: (path, body, options) => request('POST', path, body, options?.rowVersion),
     delete: (path) => request<void>('DELETE', path),
   }
 }
