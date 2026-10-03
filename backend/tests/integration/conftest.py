@@ -80,3 +80,24 @@ def make_org(engine: Engine, tenant_id: UUID, legal_name: str) -> UUID:
             {"i": org_id, "t": tenant_id, "n": legal_name},
         )
     return org_id
+
+
+def make_user(engine: Engine, *, status: str = "active") -> UUID:
+    uid = uuid7()
+    with tenant_session(engine, tenant_id=None, platform=True) as s:
+        s.execute(
+            text("insert into cbam.users (id, email, status) values (:i, :e, :s)"),
+            {"i": uid, "e": f"u-{uid.hex}@example.test", "s": status},
+        )
+    return uid
+
+
+def make_member(engine: Engine, tenant: UUID, user: UUID, *roles: str) -> None:
+    with tenant_session(engine, tenant_id=tenant) as s:
+        s.execute(
+            text(
+                "insert into cbam.memberships (id, user_id, tenant_id, roles)"
+                " values (:i, :u, :t, cast(:r as text[]))"
+            ),
+            {"i": uuid7(), "u": user, "t": tenant, "r": list(roles)},
+        )

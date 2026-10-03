@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 
-for (const path of ['/ops', '/portal']) {
+for (const path of ['/signin', '/reset-password', '/portal']) {
   test(`no serious axe violations on ${path}`, async ({ page }) => {
     await page.goto(path)
     const { violations } = await new AxeBuilder({ page })

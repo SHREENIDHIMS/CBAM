@@ -6,6 +6,7 @@ CLAUDE.md section 9: log IDs, never names, emails or phone numbers.
 import logging
 import re
 import sys
+from contextvars import ContextVar
 from typing import Any
 
 import structlog
@@ -41,13 +42,41 @@ def scrub_pii(_logger: WrappedLogger, _method: str, event_dict: EventDict) -> Ev
     return event_dict
 
 
+# FastAPI runs sync dependencies in a thread pool with a *copy* of the context, so anything
+# they bind with contextvars never reaches the route. A per-request dict is shared by
+# reference instead: the middleware creates it, dependencies update it in place.
+_request_scope: ContextVar[dict[str, Any] | None] = ContextVar("request_scope", default=None)
+
+
+def start_request_scope() -> None:
+    _request_scope.set({})
+
+
 def bind_context(**ids: Any) -> None:
     """Bind request_id / tenant_id / user_id / job_id to every following log line."""
-    bind_contextvars(**ids)
+    scope = _request_scope.get()
+    if scope is not None:
+        scope.update(ids)
+    else:
+        bind_contextvars(**ids)
 
 
 def clear_context() -> None:
     clear_contextvars()
+    _request_scope.set(None)
+
+
+def current_context() -> dict[str, Any]:
+    """The IDs bound so far (for tests and diagnostics)."""
+    merged: dict[str, Any] = dict(structlog.contextvars.get_contextvars())
+    merged.update(_request_scope.get() or {})
+    return merged
+
+
+def merge_request_scope(_logger: WrappedLogger, _method: str, event_dict: EventDict) -> EventDict:
+    for key, value in (_request_scope.get() or {}).items():
+        event_dict.setdefault(key, value)
+    return event_dict
 
 
 def configure_logging(level: str = "INFO") -> None:
@@ -55,6 +84,7 @@ def configure_logging(level: str = "INFO") -> None:
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
+            merge_request_scope,
             structlog.processors.add_log_level,
             structlog.processors.TimeStamper(fmt="iso", utc=True),
             scrub_pii,

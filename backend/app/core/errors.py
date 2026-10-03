@@ -22,6 +22,7 @@ def _slug(name: str) -> str:
 class DomainError(Exception):
     status = 400
     title = "Request could not be completed"
+    headers: dict[str, str] = {}  # noqa: RUF012 - read-only class default, never mutated
 
     def __init__(
         self,
@@ -57,6 +58,56 @@ class NotPermittedError(DomainError):
     title = "You do not have permission for this action"
 
 
+class NotConfiguredError(DomainError):
+    """A needed integration is not configured in this environment (503)."""
+
+    status = 503
+    title = "This feature is not configured"
+
+
+class AuthAdminError(DomainError):
+    """The identity provider failed or was unreachable (502). Never carries secrets."""
+
+    status = 502
+    title = "The sign-in service could not complete the request"
+
+
+class InvalidRequestError(DomainError):
+    """The request is well formed but cannot be applied (422)."""
+
+    status = 422
+    title = "The request cannot be applied"
+
+
+class ReasonRequiredError(DomainError):
+    """The change needs a non-empty reason (422)."""
+
+    status = 422
+    title = "A reason is required for this change"
+
+
+class AuthenticationError(DomainError):
+    """No valid credentials (401)."""
+
+    status = 401
+    title = "Authentication is required"
+    headers = {"WWW-Authenticate": "Bearer"}  # noqa: RUF012
+
+
+class MfaRequiredError(DomainError):
+    """The role needs a token from a session that passed MFA (aal2)."""
+
+    status = 403
+    title = "Multi-factor authentication is required for this role"
+
+
+class RecentAuthRequiredError(DomainError):
+    """A sensitive action needs a recent login."""
+
+    status = 403
+    title = "Please sign in again to confirm this action"
+
+
 class PreconditionRequiredError(DomainError):
     """If-Match is missing or unusable (RFC 6585 428)."""
 
@@ -86,6 +137,7 @@ def _problem(
     rule_id: str | None = None,
     source_id: str | None = None,
     errors: list[dict[str, Any]] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     body: dict[str, Any] = {
         "type": f"{type_base}{slug}",
@@ -101,7 +153,7 @@ def _problem(
         body["source_id"] = source_id
     if errors:
         body["errors"] = errors
-    return JSONResponse(body, status_code=status, media_type=PROBLEM_JSON)
+    return JSONResponse(body, status_code=status, media_type=PROBLEM_JSON, headers=headers)
 
 
 def install_error_handlers(app: FastAPI, *, type_base: str) -> None:
@@ -118,6 +170,7 @@ def install_error_handlers(app: FastAPI, *, type_base: str) -> None:
             rule_id=exc.rule_id,
             source_id=exc.source_id,
             errors=exc.errors,
+            headers=exc.headers or None,
         )
 
     async def validation_handler(request: Request, exc: Exception) -> JSONResponse:

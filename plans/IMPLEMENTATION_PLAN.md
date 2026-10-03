@@ -80,11 +80,11 @@ clock, money, decisions, tasks.
 4. - [x] Tables `tenants`, `organisations`, `users` (profile), `memberships`,
    `approval_roles` with RLS; RLS coverage test that fails for any tenant table without
    forced RLS (R1-001).
-5. - [ ] `core/db.py`: request-scoped transaction that sets `app.tenant_id` after the
+5. - [x] `core/db.py`: request-scoped transaction that sets `app.tenant_id` after the
    membership check; worker helper to run a job "as tenant".
-6. - [ ] `core/auth.py`: verify Supabase JWT (JWKS, expiry, audience); `aal2` required for
+6. - [x] `core/auth.py`: verify Supabase JWT (JWKS, expiry, audience); `aal2` required for
    privileged roles; recent-auth check helper for sensitive actions (R1-042).
-7. - [ ] `core/permissions.py`: roles `platform_admin`, `operations`, `client_admin`,
+7. - [x] `core/permissions.py`: roles `platform_admin`, `operations`, `client_admin`,
    `reviewer`, `approver`, `supplier`, `tax_agent`, `domain_owner`; permission map;
    `require("perm")` dependency; permission-matrix test incl. tax-agent restrictions (R1-002).
 8. - [x] `audit_events` table + append-only trigger + grants + hash chain; `core/audit.py`
@@ -92,17 +92,17 @@ clock, money, decisions, tasks.
 9. - [x] `core/decisions.py` + `decisions` table: canonical-JSON fingerprint, save, lookup.
 10. - [x] `row_version` mixin + `If-Match` handling → 409 on mismatch (R1-045).
 11. - [x] `core/errors.py`: problem+json handler, domain error types.
-12. - [ ] `tasks` module: task model, owner, due date + `due_rule`, status machine,
+12. - [x] `tasks` module: task model, owner, due date + `due_rule`, status machine,
     escalation history; API list/patch (R1-022 engine; UI later).
-13. - [ ] Frontend: Supabase Auth sign-in, MFA enrolment + challenge, sign-out, password
+13. - [x] Frontend: Supabase Auth sign-in, MFA enrolment + challenge, sign-out, password
     reset; app shell; `/me`; role-aware navigation; British English formatting helpers
     (`14 March 2027`, `£1,234.56`) with tests.
-14. - [ ] Platform admin screens: create tenant, invite users, assign roles (R1-001).
+14. - [x] Platform admin screens: create tenant, invite users, assign roles (R1-001).
 15. - [x] Structured logging (`structlog`) with request/tenant/user IDs, no PII.
 
 **Exit gate**
-- [ ] Automated test: a user of tenant A cannot read or write any tenant-B row via API or direct SQL as `cbam_app` (handbook "RLS proven")
-- [ ] Privileged role without MFA is refused
+- [x] Automated test: a user of tenant A cannot read or write any tenant-B row via API or direct SQL as `cbam_app` (handbook "RLS proven")
+- [x] Privileged role without MFA is refused
 - [x] Audit rows cannot be changed; chain verifies
 - [x] Concurrent approval test returns one success and one 409
 

@@ -29,3 +29,21 @@ def test_pii_inside_message_text_is_masked(capsys) -> None:  # type: ignore[no-u
     structlog.get_logger().info("sent to someone@example.com")
     out = capsys.readouterr().out
     assert "someone@example.com" not in out
+
+
+def test_ids_bound_in_a_copied_context_reach_the_request_scope() -> None:
+    """FastAPI runs sync dependencies in a thread pool with a *copy* of the context."""
+    import contextvars
+    import threading
+
+    from app.core.logging import current_context, start_request_scope
+
+    clear_context()
+    start_request_scope()
+    bind_context(request_id="r-1")
+    copied = contextvars.copy_context()
+    worker = threading.Thread(target=lambda: copied.run(bind_context, tenant_id="t-9"))
+    worker.start()
+    worker.join()
+    assert current_context() == {"request_id": "r-1", "tenant_id": "t-9"}
+    clear_context()
