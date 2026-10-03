@@ -40,7 +40,7 @@ before any business code.
 6. - [ ] `infra/docker-compose.yml` with Redis (and ClamAV under profile `scan`).
 7. - [x] Alembic initialised for schema `cbam`; first migration creates schema, roles
    `cbam_owner` and `cbam_app`, and revokes `anon`/`authenticated` on `cbam`.
-8. - [ ] `frontend/`: Vite + React + TS; Tailwind + shadcn/ui; routes `ops/` and `portal/`;
+8. - [x] `frontend/`: Vite + React + TS; Tailwind + shadcn/ui; routes `ops/` and `portal/`;
    eslint, prettier, vitest, Playwright + axe; `/api` proxy to :8000.
 9. - [x] Celery app (`app/core/jobs.py`) with one no-op task and beat entry, proving the
    worker and beat run locally.
