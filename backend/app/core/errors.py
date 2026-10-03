@@ -1,6 +1,7 @@
 """Domain errors and problem+json (RFC 9457) handlers. See docs/TECHNICAL_SPEC.md section 10."""
 
 import re
+from contextlib import suppress
 from typing import Any
 
 import structlog
@@ -137,10 +138,9 @@ def install_error_handlers(app: FastAPI, *, type_base: str) -> None:
         )
 
     async def unhandled_handler(request: Request, exc: Exception) -> JSONResponse:
-        try:
+        # A logging failure must never break the error response.
+        with suppress(Exception):
             _log.error("unhandled_error", error_type=type(exc).__name__, path=request.url.path)
-        except Exception:
-            pass
         return _problem(
             request,
             type_base=type_base,
