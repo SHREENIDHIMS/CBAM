@@ -94,7 +94,7 @@ clock, money, decisions, tasks.
 11. - [x] `core/errors.py`: problem+json handler, domain error types.
 12. - [x] `tasks` module: task model, owner, due date + `due_rule`, status machine,
     escalation history; API list/patch (R1-022 engine; UI later).
-13. - [ ] Frontend: Supabase Auth sign-in, MFA enrolment + challenge, sign-out, password
+13. - [x] Frontend: Supabase Auth sign-in, MFA enrolment + challenge, sign-out, password
     reset; app shell; `/me`; role-aware navigation; British English formatting helpers
     (`14 March 2027`, `£1,234.56`) with tests.
 14. - [ ] Platform admin screens: create tenant, invite users, assign roles (R1-001).
