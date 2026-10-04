@@ -92,7 +92,11 @@ mid-file then resume without duplicates, retries exhausted gives `failed` with a
 IMP-14 running a finished batch again changes nothing, retry makes a new batch; IMP-15 seven
 decimal places reported never rounded, commodity codes kept exactly; IMP-16 exception report
 JSON and CSV (formula escaping, no cell values); IMP-17 immutability, row-level security and
-the app-level tenant filter, migration 0010 down and up.
+the app-level tenant filter, migration 0010 down and up; IMP-18 resource limits (400 huge
+headings, too many columns, long headings, cell and row caps, 5,000 comma-only rows, chunk
+character budget, NUL, crash-loop guard, permanent errors, infected file); IMP-19 ambiguous or
+incomplete layout, layout chosen by acquisition date; IMP-20 beat sweeper recovers a batch
+after a broker outage; IMP-21 no rows for a final batch, resolution lock, cursor range.
 
 ### Portal extras (R1-055, R1-056)
 EU template fixture pre-fills the form with `EU_TEMPLATE` provenance; unknown template
