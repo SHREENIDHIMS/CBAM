@@ -223,7 +223,12 @@ changed; UI changes checked in a browser with Playwright.
 - Open a PR; never merge it, never push to `main`, never force-push, unless the user
   says so for that PR.
 - **No AI attribution anywhere** (commits, PRs, comments, docs). No Co-Authored-By
-  trailers, no "generated with" footers.
+  trailers, no "generated with" footers. This includes footers the GitHub tooling adds
+  to a PR body: check the body after opening the PR and remove any footer.
+- **Delete the branch after its PR is merged.** Once the user merges (or tells Claude to
+  merge) a PR, delete its head branch on the remote and locally so the repository stays
+  clean. Start the next piece of work from a fresh branch cut from the updated `main`.
+  Never delete `main`, and never delete a branch that has an open PR or unmerged commits.
 - `docs/spec/` is read-only. Spec changes go into `docs/PRD.md` §6 and
   `docs/GAP_ANALYSIS.md`, never into the signed-off files.
 
