@@ -66,7 +66,9 @@ tampered figure in a return, or evidence lost before six years.
   `pending` files are not downloadable by others; `infected` quarantined.
 - Office files are never rendered server-side with macros; Excel parsed with
   `openpyxl` read-only, formulas not evaluated.
-- CSV exports escape leading `= + - @` to prevent formula injection.
+- CSV exports escape leading `= + - @` to prevent formula injection. **Checklist for every export and for the import exception report (Phase 3 step 9, Phase 7 exports):** cell values that came from uploaded files (descriptions, supplier names, MRNs, free text) must go through the escaping helper before they are written to a CSV or spreadsheet; a test with `=cmd|...`, `+1`, `-1` and `@SUM(1)` cells is part of each export's definition of done.
+- Signed URLs live at most 5 minutes: `SIGNED_URL_TTL_SECONDS` is validated to 1 to 300 and the app refuses to start with a larger value.
+- The Supabase service-role key is a `SecretStr`, unwrapped only inside the Storage client's default headers; Sentry runs with `include_local_variables=False` and a recursive scrubber that drops `service_key`, `service_role_key`, `key`, `headers`, `apikey` and `authorization`; storage errors carry only the operation and a status code or exception class.
 
 ### Web
 - HTTPS only, HSTS. Bearer tokens (no auth cookies, so no CSRF); the portal

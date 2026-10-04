@@ -174,7 +174,8 @@ clock, money, decisions, tasks.
    overlap detection; monthly ops task on the 1st to fetch last month; record whether the
    client granted us third-party access; account for the 2-day / 72-hour HMRC lag.
 9. - [ ] UI: import batch list/detail, exception report (view + CSV), import ledger with
-   filters, line detail showing source row.
+   filters, line detail showing source row. The CSV export must escape leading `= + - @` in
+   every cell that came from an uploaded file (docs/SECURITY.md files checklist).
 
 **Exit gate**
 - [ ] **500-row CDS file imports cleanly with errors reported per row** (handbook gate)
