@@ -47,7 +47,8 @@ def clean(admin_engine: Engine) -> Iterator[None]:
     # session_replication_role. The owner may switch off its own tables' triggers and RLS.
     with admin_engine.begin() as conn:
         conn.execute(text("set local role cbam_owner"))
-        for table in ALL_TABLES:
+        # batches that used a layout version point at it, so they go first
+        for table in ("row_exceptions", "source_rows", "import_batches", *ALL_TABLES):
             conn.execute(text(f"alter table cbam.{table} disable trigger user"))
             conn.execute(text(f"alter table cbam.{table} no force row level security"))
             conn.execute(text(f"delete from cbam.{table}"))  # noqa: S608

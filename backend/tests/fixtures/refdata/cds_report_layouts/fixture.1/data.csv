@@ -1,3 +1,14 @@
-report_type,column_name,maps_to,required
-import_item,fixture_column,declaration.mrn,true
-import_header,fixture_other,,false
+report_type,column_name,maps_to,required,date_format
+import_item,SYNTH_MRN,declaration.mrn,true,
+import_item,SYNTH_ACCEPTANCE_DATE,declaration.acceptance_date,true,%d/%m/%Y
+import_item,SYNTH_EORI,declaration.eori,false,
+import_item,SYNTH_ITEM_NO,line.item_no,true,
+import_item,SYNTH_COMMODITY_CODE,line.commodity_code,true,
+import_item,SYNTH_NET_MASS_KG,line.net_mass_kg,true,
+import_item,SYNTH_CUSTOMS_VALUE,line.customs_value,true,
+import_item,SYNTH_CURRENCY,line.customs_value_currency,true,
+import_item,SYNTH_ORIGIN,line.origin_country,true,
+import_item,SYNTH_VALUATION_BASIS,line.valuation_basis,false,
+import_item,SYNTH_SUPPLIER,line.supplier_ref,false,
+import_item,SYNTH_DESCRIPTION,line.description,false,
+import_header,SYNTH_HEADER_NOTE,,false,

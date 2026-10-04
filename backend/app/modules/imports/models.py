@@ -1,4 +1,5 @@
-"""SQLAlchemy Core definitions mirroring migration 0009 (the migration is the source of truth)."""
+"""SQLAlchemy Core definitions mirroring migrations 0009 and 0010 (the migrations are the source
+of truth)."""
 
 from sqlalchemy import (
     BigInteger,
@@ -12,6 +13,7 @@ from sqlalchemy import (
     Text,
     Uuid,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 
 metadata = MetaData(schema="cbam")
 
@@ -67,8 +69,43 @@ import_batches = Table(
     Column("lines_created", Integer, nullable=False),
     Column("lines_unchanged", Integer, nullable=False),
     Column("failure_reason", Text),
+    Column("report_layout_version_id", Uuid),
+    Column("layout_status", Text),
     Column("created_at", DateTime(timezone=True)),
     Column("created_by", Uuid),
+    Column("updated_at", DateTime(timezone=True)),
+    Column("row_version", Integer, nullable=False),
+)
+
+source_rows = Table(
+    "source_rows",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("tenant_id", Uuid, nullable=False),
+    Column("batch_id", Uuid, nullable=False),
+    Column("row_number", Integer, nullable=False),
+    Column("raw", JSONB, nullable=False),
+    Column("row_sha256", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+)
+
+row_exceptions = Table(
+    "row_exceptions",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("tenant_id", Uuid, nullable=False),
+    Column("batch_id", Uuid, nullable=False),
+    Column("source_row_id", Uuid),
+    Column("row_number", Integer, nullable=False),
+    Column("field", Text, nullable=False),
+    Column("code", Text, nullable=False),
+    Column("severity", Text, nullable=False),
+    Column("message", Text, nullable=False),
+    Column("status", Text, nullable=False),
+    Column("resolved_by", Uuid),
+    Column("resolved_at", DateTime(timezone=True)),
+    Column("resolution_reason", Text),
+    Column("created_at", DateTime(timezone=True)),
     Column("updated_at", DateTime(timezone=True)),
     Column("row_version", Integer, nullable=False),
 )
