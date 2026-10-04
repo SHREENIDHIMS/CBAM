@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     recent_auth_minutes: int = 15
     # Product workflow, not law (CLAUDE.md rule 13): days overdue at which a task escalates.
     task_escalation_overdue_days: tuple[int, ...] = (7, 14, 28)
+    # Supabase Storage (private buckets; the backend signs URLs, the frontend never lists).
+    supabase_storage_bucket_imports: str = "customs-imports"
+    signed_url_ttl_seconds: int = 300
+    # Operational limit for one uploaded customs file (bytes). Not law: tune per environment.
+    import_max_file_bytes: int = 52_428_800
     sentry_dsn: str = ""
     sentry_environment: str = "local"
     # R1-053: seconds that count as one "day" in the outreach schedule.
