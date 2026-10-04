@@ -119,7 +119,12 @@ enabled = true
 # The maximum file size allowed (e.g. "5MB", "500KB").
 file_size_limit = "50MiB"
 
-# Uncomment to configure local storage buckets
+# Original customs files (R1-003). Private: only the backend reads it, with the service-role key.
+[storage.buckets.customs-imports]
+public = false
+file_size_limit = "50MiB"
+
+# Uncomment to configure more local storage buckets
 # [storage.buckets.images]
 # public = false
 # file_size_limit = "50MiB"

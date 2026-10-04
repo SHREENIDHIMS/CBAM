@@ -68,8 +68,8 @@ the resulting token.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/tenants/{t}/import-batches` | Upload CDS file (multipart) + acquisition method; idempotent on SHA-256 |
-| GET | `/tenants/{t}/import-batches` · `/{id}` | Status, counts, provenance |
+| POST | `/tenants/{t}/import-batches` | Upload CDS file (multipart `file` + `acquisition_method`, optional `cds_report_type`, `eori`, `window_start`, `window_end`, `source_owner`, `acquired_on`); `imports:write`; optional `Idempotency-Key`. **202** new batch (`status: received`), **200** `replayed: true` when the same SHA-256 and details were already received, **409** same file with different declared details, or an `Idempotency-Key` already used for a different file, **413** over `IMPORT_MAX_FILE_BYTES`, **415** not UTF-8 CSV text (binary, NUL bytes), **422** bad details, empty file or no header row, **429** too many uploads in flight for this client (`Retry-After`; cap `IMPORT_MAX_CONCURRENT_UPLOADS_PER_TENANT`, per API process), **503** storage not configured. Replay rules: the same bytes replay whatever `Idempotency-Key` is sent (a different key for a file already received is ignored and not stored); a batch in `failed` or `rejected` is history and does not count, so the same bytes after one of those create a new batch (202) while the old batch stays as it was; after `completed` or `completed_with_errors` they replay (200). The `Idempotency-Key` header must be 1 to 200 visible ASCII characters (422 otherwise). `failure_reason` on a batch is a short code (`^[a-z0-9_]{1,64}$`), never parser text |
+| GET | `/tenants/{t}/import-batches` · `/{id}` | Status, counts, provenance (`imports:read`); list is newest first with `status`, `limit`, `cursor`; another tenant's batch is 404 |
 | GET | `/tenants/{t}/import-batches/{id}/exceptions` | Row-level exception report (JSON/CSV) |
 | GET | `/tenants/{t}/customs-data/coverage?eori=&from=&to=` | Coverage calendar: loaded windows, gaps, overlaps (R1-054) |
 | GET/PUT | `/tenants/{t}/customs-data/access` | Third-party access status per EORI (R1-054) |

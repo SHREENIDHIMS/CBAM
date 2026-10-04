@@ -79,6 +79,38 @@ class InvalidRequestError(DomainError):
     title = "The request cannot be applied"
 
 
+class StorageError(DomainError):
+    """The file store failed or was unreachable (502). Never carries secrets or file contents."""
+
+    status = 502
+    title = "The file store could not complete the request"
+
+
+class PayloadTooLargeError(DomainError):
+    status = 413
+    title = "The file is too large"
+
+
+class UnsupportedMediaError(DomainError):
+    status = 415
+    title = "This kind of file is not accepted"
+
+
+class TooManyRequestsError(DomainError):
+    """The caller has too many of this kind of request in flight (429)."""
+
+    status = 429
+    title = "Too many requests in progress"
+    headers = {"Retry-After": "5"}  # noqa: RUF012
+
+
+class IdempotencyConflictError(DomainError):
+    """The same file or Idempotency-Key was already used with different details (409)."""
+
+    status = 409
+    title = "This was already received with different details"
+
+
 class ReasonRequiredError(DomainError):
     """The change needs a non-empty reason (422)."""
 

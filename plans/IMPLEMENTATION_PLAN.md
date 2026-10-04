@@ -156,7 +156,7 @@ clock, money, decisions, tasks.
 1. - [ ] Freeze the column mapping from real (masked) HMRC "Get customs data" reports
    (DATA-DEC-002); if not yet available, from HMRC's published report descriptions +
    synthetic files, marked provisional. Mapping lives in `ref_cds_report_layouts`.
-2. - [ ] `import_batches` + upload endpoint: store original file in Storage, SHA-256
+2. - [x] `import_batches` + upload endpoint: store original file in Storage, SHA-256
    idempotency, acquisition method (R1-003).
 3. - [ ] `source_rows` (raw, immutable) + row validation → `row_exceptions` (missing/invalid
    commodity code, weight, tax point inputs, origin, value, supplier mapping) (R1-025).
@@ -174,7 +174,8 @@ clock, money, decisions, tasks.
    overlap detection; monthly ops task on the 1st to fetch last month; record whether the
    client granted us third-party access; account for the 2-day / 72-hour HMRC lag.
 9. - [ ] UI: import batch list/detail, exception report (view + CSV), import ledger with
-   filters, line detail showing source row.
+   filters, line detail showing source row. The CSV export must escape leading `= + - @` in
+   every cell that came from an uploaded file (docs/SECURITY.md files checklist).
 
 **Exit gate**
 - [ ] **500-row CDS file imports cleanly with errors reported per row** (handbook gate)
