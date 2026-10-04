@@ -156,7 +156,7 @@ clock, money, decisions, tasks.
 1. - [ ] Freeze the column mapping from real (masked) HMRC "Get customs data" reports
    (DATA-DEC-002); if not yet available, from HMRC's published report descriptions +
    synthetic files, marked provisional. Mapping lives in `ref_cds_report_layouts`.
-2. - [ ] `import_batches` + upload endpoint: store original file in Storage, SHA-256
+2. - [x] `import_batches` + upload endpoint: store original file in Storage, SHA-256
    idempotency, acquisition method (R1-003).
 3. - [ ] `source_rows` (raw, immutable) + row validation → `row_exceptions` (missing/invalid
    commodity code, weight, tax point inputs, origin, value, supplier mapping) (R1-025).

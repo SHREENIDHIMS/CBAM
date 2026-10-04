@@ -68,8 +68,8 @@ the resulting token.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/tenants/{t}/import-batches` | Upload CDS file (multipart) + acquisition method; idempotent on SHA-256 |
-| GET | `/tenants/{t}/import-batches` · `/{id}` | Status, counts, provenance |
+| POST | `/tenants/{t}/import-batches` | Upload CDS file (multipart `file` + `acquisition_method`, optional `cds_report_type`, `eori`, `window_start`, `window_end`, `source_owner`, `acquired_on`); `imports:write`; optional `Idempotency-Key`. **202** new batch (`status: received`), **200** `replayed: true` when the same SHA-256 and details were already received, **409** same file with different details (or key reused for another file), **413** over `IMPORT_MAX_FILE_BYTES`, **415** not UTF-8 CSV text (binary, NUL bytes), **422** bad details, empty file or no header row, **503** storage not configured |
+| GET | `/tenants/{t}/import-batches` · `/{id}` | Status, counts, provenance (`imports:read`); list is newest first with `status`, `limit`, `cursor`; another tenant's batch is 404 |
 | GET | `/tenants/{t}/import-batches/{id}/exceptions` | Row-level exception report (JSON/CSV) |
 | GET | `/tenants/{t}/customs-data/coverage?eori=&from=&to=` | Coverage calendar: loaded windows, gaps, overlaps (R1-054) |
 | GET/PUT | `/tenants/{t}/customs-data/access` | Third-party access status per EORI (R1-054) |
