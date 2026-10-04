@@ -156,9 +156,12 @@ clock, money, decisions, tasks.
 1. - [ ] Freeze the column mapping from real (masked) HMRC "Get customs data" reports
    (DATA-DEC-002); if not yet available, from HMRC's published report descriptions +
    synthetic files, marked provisional. Mapping lives in `ref_cds_report_layouts`.
+   *Note: a provisional SYNTHETIC layout (invented `SYNTH_*` column names) exists only as a
+   test fixture (`backend/tests/fixtures/refdata/cds_report_layouts`). Nothing is in
+   `backend/refdata/`; the real mapping needs a masked HMRC report before the pilot.*
 2. - [x] `import_batches` + upload endpoint: store original file in Storage, SHA-256
    idempotency, acquisition method (R1-003).
-3. - [ ] `source_rows` (raw, immutable) + row validation → `row_exceptions` (missing/invalid
+3. - [x] `source_rows` (raw, immutable) + row validation → `row_exceptions` (missing/invalid
    commodity code, weight, tax point inputs, origin, value, supplier mapping) (R1-025).
 4. - [ ] Normalise into `declarations`, `import_lines`, `parties` with exact commodity code,
    net mass kg (6 dp), customs value + valuation basis, origin as declared (R1-005, R1-010).
@@ -178,7 +181,7 @@ clock, money, decisions, tasks.
    every cell that came from an uploaded file (docs/SECURITY.md files checklist).
 
 **Exit gate**
-- [ ] **500-row CDS file imports cleanly with errors reported per row** (handbook gate)
+- [ ] **500-row CDS file imports cleanly with errors reported per row** (handbook gate) — *row validation, raw rows and the exception report are proven by IMP-10 (500 rows, 37 seeded bad rows, synthetic provisional layout); tick when step 4 normalises the valid rows and the layout is the real one*
 - [ ] A year of fixture "Get customs data" reports loads without duplicates and a missing window shows as a gap with a task
 - [ ] Replaying a file creates no duplicate business records
 - [ ] Every line links to its exact source row and file

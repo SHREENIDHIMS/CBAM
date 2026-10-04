@@ -84,6 +84,15 @@ then the 10,000-row load test. "Get customs data": item + header + tax-lines rep
 join correctly; overlapping 31-day reports do not duplicate lines; a missing window
 appears as a gap; GB and XI EORIs tracked separately; changed report layout handled
 by a new `ref_cds_report_layouts` version.
+Scenario IDs (backend `tests/integration/test_import_processing.py`, synthetic provisional
+layout, DATA-DEC-002): IMP-10 500 rows with 37 seeded bad rows, exceptions match exactly and
+valid rows continue; IMP-11 missing columns, duplicate or blank headings; IMP-12 layout not
+active is never used, and a new activated layout version needs no code change; IMP-13 crash
+mid-file then resume without duplicates, retries exhausted gives `failed` with a short code;
+IMP-14 running a finished batch again changes nothing, retry makes a new batch; IMP-15 seven
+decimal places reported never rounded, commodity codes kept exactly; IMP-16 exception report
+JSON and CSV (formula escaping, no cell values); IMP-17 immutability, row-level security and
+the app-level tenant filter, migration 0010 down and up.
 
 ### Portal extras (R1-055, R1-056)
 EU template fixture pre-fills the form with `EU_TEMPLATE` provenance; unknown template
