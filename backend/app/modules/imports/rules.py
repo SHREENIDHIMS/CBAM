@@ -7,6 +7,7 @@ database enforces the same status order with a trigger (migration 0009, CLAUDE.m
 import codecs
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from datetime import date
 
@@ -26,6 +27,8 @@ PROGRESS_STATES: tuple[str, ...] = (
 TERMINAL_STATES: frozenset[str] = frozenset(
     {"completed", "completed_with_errors", "failed", "rejected"}
 )
+# Finished without a usable result: kept as history, never blocks sending the same bytes again.
+HISTORY_STATES: tuple[str, ...] = ("failed", "rejected")
 STATUSES: tuple[str, ...] = (*PROGRESS_STATES, *sorted(TERMINAL_STATES))
 
 # Methods that bring a file. `manual_entry` has no file and `feed` is for a future HMRC/CDS
@@ -81,10 +84,6 @@ class Utf8Checker:
         self._seen = 0
         self._head = b""
 
-    @property
-    def ok(self) -> bool:
-        return self._ok
-
     def feed(self, chunk: bytes) -> bool:
         if not self._ok:
             return False
@@ -120,14 +119,6 @@ def looks_delimited(head: bytes) -> bool:
     return any(d in first_line for d in _DELIMITERS)
 
 
-def is_probably_csv_utf8(sample: bytes) -> bool:
-    """Quick check of a leading sample: UTF-8 text without NUL bytes and a delimited header."""
-    checker = Utf8Checker()
-    checker.feed(sample)
-    # A sample may stop inside a multi-byte character, so only the NUL/invalid-byte checks count.
-    return checker.ok and len(sample) > 0 and looks_delimited(sample)
-
-
 def safe_filename(name: str | None) -> str:
     """A display-only filename: no directories, no control characters, at most 255 characters.
 
@@ -148,3 +139,12 @@ def request_fingerprint(declared: Mapping[str, str | None]) -> bytes:
 def acquired_on_is_valid(acquired_on: date | None, as_of: date) -> bool:
     """The acquisition date cannot be in the future (UK date from the injected clock)."""
     return acquired_on is None or acquired_on <= as_of
+
+
+_FAILURE_CODE = re.compile(r"^[a-z0-9_]{1,64}$")
+
+
+def is_failure_code(value: str) -> bool:
+    """A failure reason is a short code such as `unreadable_header`, never free text: parser
+    messages can quote cell values, which may be personal data, and the reason is audited."""
+    return _FAILURE_CODE.match(value) is not None

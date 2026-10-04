@@ -2,9 +2,9 @@
 should be, and a batch's status only moves forward (database trigger and application rule)."""
 
 import io
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from datetime import UTC, date, datetime
 from uuid import UUID
 
@@ -14,10 +14,16 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.core.db import tenant_session
-from app.core.errors import RuleBlockedError, StaleVersionError
+from app.core.errors import (
+    InvalidRequestError,
+    RuleBlockedError,
+    StaleVersionError,
+    StorageError,
+    TenantMismatchError,
+)
 from app.core.ids import uuid7
 from app.core.storage import InMemoryStore
-from app.modules.imports import service
+from app.modules.imports import rules, service
 from app.modules.imports.schemas import ImportBatchMetadata
 from app.modules.imports.service import Actor
 from tests.integration.conftest import make_tenant
@@ -28,22 +34,27 @@ CSV = b"mrn,commodity_code\nA1,72011000\n"
 META = ImportBatchMetadata(acquisition_method="cds_export", eori="GB123456789012")
 
 
-def _receive(engine: Engine, tenant: UUID, data: bytes = CSV, store: InMemoryStore | None = None):  # type: ignore[no-untyped-def]
+def _receive(  # type: ignore[no-untyped-def]
+    engine: Engine,
+    tenant: UUID,
+    data: bytes = CSV,
+    store: InMemoryStore | None = None,
+    open_session: Callable[[], AbstractContextManager[Session]] | None = None,
+):
     store = store or InMemoryStore()
     scanned = service.scan_upload(io.BytesIO(data), max_bytes=10_000)
-    with tenant_session(engine, tenant_id=tenant) as s:
-        return service.receive_file(
-            s,
-            store=store,
-            tenant_id=tenant,
-            actor=SYSTEM,
-            now=NOW,
-            as_of=date(2027, 3, 1),
-            file=io.BytesIO(data),
-            scanned=scanned,
-            filename="a.csv",
-            metadata=META,
-        )
+    return service.receive_file(
+        open_session or (lambda: tenant_session(engine, tenant_id=tenant)),
+        store=store,
+        tenant_id=tenant,
+        actor=SYSTEM,
+        now=NOW,
+        as_of=date(2027, 3, 1),
+        file=io.BytesIO(data),
+        scanned=scanned,
+        filename="a.csv",
+        metadata=META,
+    )
 
 
 def _raw(engine: Engine, tenant: UUID | None, sql: str, **params: object) -> int:
@@ -68,7 +79,7 @@ def _owner(engine: Engine, tenant: UUID) -> Iterator[Session]:
 TABLES = ("documents", "document_versions", "import_batches")
 
 
-def test_tenant_b_sees_none_of_tenant_as_import_rows(app_engine: Engine) -> None:
+def test_r1_003_tenant_b_sees_none_of_tenant_as_import_rows(app_engine: Engine) -> None:
     a, b = make_tenant(app_engine, "A"), make_tenant(app_engine, "B")
     _receive(app_engine, a)
     for table in TABLES:
@@ -76,7 +87,7 @@ def test_tenant_b_sees_none_of_tenant_as_import_rows(app_engine: Engine) -> None
         assert _count(app_engine, b, table) == 0
 
 
-def test_no_tenant_context_fails_closed_for_reads_and_writes(app_engine: Engine) -> None:
+def test_r1_003_no_tenant_context_fails_closed_for_reads_and_writes(app_engine: Engine) -> None:
     a = make_tenant(app_engine, "A")
     batch = _receive(app_engine, a)
     for table in TABLES:
@@ -100,7 +111,7 @@ def test_no_tenant_context_fails_closed_for_reads_and_writes(app_engine: Engine)
         )
 
 
-def test_tenant_b_cannot_write_or_move_rows_of_tenant_a(app_engine: Engine) -> None:
+def test_r1_003_tenant_b_cannot_write_or_move_rows_of_tenant_a(app_engine: Engine) -> None:
     a, b = make_tenant(app_engine, "A"), make_tenant(app_engine, "B")
     batch = _receive(app_engine, a)
     with pytest.raises(DBAPIError):
@@ -130,7 +141,7 @@ def test_tenant_b_cannot_write_or_move_rows_of_tenant_a(app_engine: Engine) -> N
         )
 
 
-def test_app_role_cannot_delete_or_truncate_import_rows(app_engine: Engine) -> None:
+def test_r1_003_app_role_cannot_delete_or_truncate_import_rows(app_engine: Engine) -> None:
     a = make_tenant(app_engine, "A")
     _receive(app_engine, a)
     for table in TABLES:
@@ -140,7 +151,7 @@ def test_app_role_cannot_delete_or_truncate_import_rows(app_engine: Engine) -> N
             _raw(app_engine, a, f"truncate cbam.{table} cascade")
 
 
-def test_documents_and_versions_cannot_be_updated_by_app_or_owner(
+def test_r1_003_documents_and_versions_cannot_be_updated_by_app_or_owner(
     app_engine: Engine, admin_engine: Engine
 ) -> None:
     a = make_tenant(app_engine, "A")
@@ -156,7 +167,7 @@ def test_documents_and_versions_cannot_be_updated_by_app_or_owner(
             s.execute(text(f"delete from cbam.{table}"))  # noqa: S608
 
 
-def test_batch_source_facts_are_immutable(app_engine: Engine, admin_engine: Engine) -> None:
+def test_r1_003_batch_source_facts_are_immutable(app_engine: Engine, admin_engine: Engine) -> None:
     a = make_tenant(app_engine, "A")
     batch = _receive(app_engine, a)
     changes = {
@@ -188,7 +199,9 @@ def test_batch_source_facts_are_immutable(app_engine: Engine, admin_engine: Engi
         )
 
 
-def test_status_moves_forward_only_and_progress_columns_can_change(app_engine: Engine) -> None:
+def test_r1_003_status_moves_forward_only_and_progress_columns_can_change(
+    app_engine: Engine,
+) -> None:
     a = make_tenant(app_engine, "A")
     batch = _receive(app_engine, a)
     ok = "update cbam.import_batches set status = :s, rows_total = :n where id = :i"
@@ -224,7 +237,7 @@ def test_status_moves_forward_only_and_progress_columns_can_change(app_engine: E
 
 
 @pytest.mark.parametrize("terminal", ["completed", "completed_with_errors", "failed", "rejected"])
-def test_terminal_batches_are_locked(
+def test_r1_003_terminal_batches_are_locked(
     app_engine: Engine, admin_engine: Engine, terminal: str
 ) -> None:
     a = make_tenant(app_engine, "A")
@@ -253,7 +266,7 @@ def test_terminal_batches_are_locked(
         )
 
 
-def test_checks_reject_bad_rows_even_from_the_owner(
+def test_r1_003_checks_reject_bad_rows_even_from_the_owner(
     app_engine: Engine, admin_engine: Engine
 ) -> None:
     a = make_tenant(app_engine, "A")
@@ -289,7 +302,7 @@ def test_checks_reject_bad_rows_even_from_the_owner(
         )
 
 
-def test_one_batch_per_tenant_and_hash_enforced_by_the_database(
+def test_r1_003_one_batch_per_tenant_and_hash_enforced_by_the_database(
     app_engine: Engine, admin_engine: Engine
 ) -> None:
     a = make_tenant(app_engine, "A")
@@ -309,7 +322,9 @@ def test_one_batch_per_tenant_and_hash_enforced_by_the_database(
         )
 
 
-def test_concurrent_uploads_of_the_same_file_make_one_batch(app_engine: Engine) -> None:
+def test_r1_003_concurrent_uploads_of_the_same_file_make_one_batch_and_one_blob(
+    app_engine: Engine,
+) -> None:
     a = make_tenant(app_engine, "A")
     store = InMemoryStore()
     with ThreadPoolExecutor(max_workers=6) as pool:
@@ -318,10 +333,202 @@ def test_concurrent_uploads_of_the_same_file_make_one_batch(app_engine: Engine) 
     assert sum(1 for r in results if not r.replayed) == 1
     assert _count(app_engine, a, "import_batches") == 1
     assert _count(app_engine, a, "documents") == 1
+    # Losers delete their own blob: exactly the winner's survives and the database points at it.
+    assert len(store.objects) == 1
+    with tenant_session(app_engine, tenant_id=a) as s:
+        stored = s.execute(text("select storage_key from cbam.document_versions")).scalar_one()
+    assert list(store.objects) == [stored]
+
+
+def test_r1_003_concurrent_uploads_with_different_keys_for_one_file_make_one_batch(
+    app_engine: Engine,
+) -> None:
+    a = make_tenant(app_engine, "A")
+    store = InMemoryStore()
+
+    def upload(i: int):  # type: ignore[no-untyped-def]
+        scanned = service.scan_upload(io.BytesIO(CSV), max_bytes=10_000)
+        return service.receive_file(
+            lambda: tenant_session(app_engine, tenant_id=a),
+            store=store,
+            tenant_id=a,
+            actor=SYSTEM,
+            now=NOW,
+            as_of=date(2027, 3, 1),
+            file=io.BytesIO(CSV),
+            scanned=scanned,
+            filename="a.csv",
+            metadata=META,
+            idempotency_key=f"key-{i}",
+        )
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(upload, range(6)))
+    assert len({r.id for r in results}) == 1
+    assert sum(1 for r in results if not r.replayed) == 1
+    assert _count(app_engine, a, "import_batches") == 1
+    assert len(store.objects) == 1
+
+
+class _StubbornStore(InMemoryStore):
+    """A store whose cleanup fails: the request must still succeed."""
+
+    def delete(self, key: str) -> None:
+        raise StorageError("deleting the file failed (500)")
+
+
+@pytest.mark.parametrize("cleanup_works", [True, False])
+def test_r1_003_a_request_that_loses_the_race_returns_the_winner_and_discards_its_blob(
+    app_engine: Engine, cleanup_works: bool
+) -> None:
+    a = make_tenant(app_engine, "A")
+    winner_store = InMemoryStore()
+    loser_store: InMemoryStore = InMemoryStore() if cleanup_works else _StubbornStore()
+    calls = {"n": 0}
+    winner = {}
+
+    def open_session() -> AbstractContextManager[Session]:
+        calls["n"] += 1
+        if calls["n"] == 2:  # between the replay pre-check and the insert transaction
+            winner["batch"] = _receive(app_engine, a, store=winner_store)
+        return tenant_session(app_engine, tenant_id=a)
+
+    result = _receive(app_engine, a, store=loser_store, open_session=open_session)
+    assert result.replayed is True
+    assert result.id == winner["batch"].id
+    assert _count(app_engine, a, "import_batches") == 1
+    assert len(winner_store.objects) == 1
+    assert len(loser_store.objects) == (0 if cleanup_works else 1)
+
+
+def test_r1_003_a_failed_transaction_discards_the_stored_blob(
+    app_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    a = make_tenant(app_engine, "A")
+    store = InMemoryStore()
+
+    def boom(*_a: object, **_k: object) -> None:
+        raise RuntimeError("audit write failed")
+
+    monkeypatch.setattr(service, "record", boom)
+    with pytest.raises(RuntimeError):
+        _receive(app_engine, a, store=store)
     assert store.put_calls == 1
+    assert store.objects == {}
+    assert _count(app_engine, a, "import_batches") == 0
+    assert _count(app_engine, a, "documents") == 0
 
 
-def test_advance_batch_follows_the_rule_writes_audit_and_checks_the_version(
+def test_r1_003_the_app_filters_by_tenant_even_when_row_level_security_is_off(
+    app_engine: Engine, admin_engine: Engine
+) -> None:
+    """CLAUDE.md rule 7: the app filter is the second lock. With forced RLS switched off for
+    the owner (rolled back at the end), tenant A still cannot see or move tenant B's batch."""
+    a, b = make_tenant(app_engine, "A"), make_tenant(app_engine, "B")
+    batch_b = _receive(app_engine, b)
+    batch_a = _receive(app_engine, a, data=CSV + b"A2,72011000\n")
+    with admin_engine.connect() as conn:
+        outer = conn.begin()
+        try:
+            conn.execute(text("set local role cbam_owner"))
+            conn.execute(text("alter table cbam.import_batches no force row level security"))
+            session = Session(conn)
+            visible = session.execute(
+                text("select count(*) from cbam.import_batches where tenant_id in (:a, :b)"),
+                {"a": a, "b": b},
+            ).scalar_one()
+            assert visible == 2, "row-level security should be off for this check"
+            with pytest.raises(TenantMismatchError):
+                service.get_batch(session, a, batch_b.id)
+            assert service.get_batch(session, a, batch_a.id).id == batch_a.id
+            assert [i.id for i in service.list_batches(session, a).items] == [batch_a.id]
+            assert [i.id for i in service.list_batches(session, b).items] == [batch_b.id]
+            with pytest.raises(TenantMismatchError):
+                service.advance_batch(
+                    session,
+                    tenant_id=a,
+                    batch_id=batch_b.id,
+                    target="parsing",
+                    expected_version=1,
+                    actor=SYSTEM,
+                    now=NOW,
+                )
+            fingerprint = rules.request_fingerprint(META.declared())
+            assert (
+                service._find_replay(
+                    session,
+                    tenant_id=a,
+                    sha256=batch_b.file_sha256 or "",
+                    fingerprint=fingerprint,
+                    idempotency_key=None,
+                )
+                is None
+            )
+        finally:
+            outer.rollback()
+
+
+def test_r1_003_cross_tenant_links_fail_even_for_the_owner(
+    app_engine: Engine, admin_engine: Engine
+) -> None:
+    a, b = make_tenant(app_engine, "A"), make_tenant(app_engine, "B")
+    _receive(app_engine, b)
+    with tenant_session(app_engine, tenant_id=b) as s:
+        doc_b = s.execute(text("select id from cbam.documents")).scalar_one()
+        version_b = s.execute(text("select id from cbam.document_versions")).scalar_one()
+    with pytest.raises(DBAPIError, match="foreign key"), _owner(admin_engine, a) as s:
+        s.execute(
+            text(
+                "insert into cbam.document_versions (id, tenant_id, document_id, version, storage_key, "
+                "sha256, size_bytes, mime_detected, original_filename, uploaded_by_type) "
+                "values (:i, :t, :d, 2, 'k', repeat('a', 64), 1, 'text/csv', 'x.csv', 'system')"
+            ),
+            {"i": uuid7(), "t": a, "d": doc_b},
+        )
+    with pytest.raises(DBAPIError, match="foreign key"), _owner(admin_engine, a) as s:
+        s.execute(
+            text(
+                "insert into cbam.import_batches (id, tenant_id, file_sha256, document_version_id, "
+                "acquisition_method, request_fingerprint) "
+                "values (:i, :t, repeat('c', 64), :v, 'cds_export', decode(repeat('ab', 32), 'hex'))"
+            ),
+            {"i": uuid7(), "t": a, "v": version_b},
+        )
+
+
+def test_r1_003_failure_reason_must_be_a_short_code(
+    app_engine: Engine,
+) -> None:
+    a = make_tenant(app_engine, "A")
+    batch = _receive(app_engine, a)
+    for text_value in ("Bad value 'John Smith' in row 3", "UPPER", "x" * 65, ""):
+        with pytest.raises(InvalidRequestError), tenant_session(app_engine, tenant_id=a) as s:
+            service.advance_batch(
+                s,
+                tenant_id=a,
+                batch_id=batch.id,
+                target="failed",
+                expected_version=1,
+                actor=SYSTEM,
+                now=NOW,
+                failure_reason=text_value,
+            )
+        with pytest.raises(DBAPIError, match="failure_reason"):
+            _raw(
+                app_engine,
+                a,
+                "update cbam.import_batches set failure_reason = :r where id = :i",
+                r=text_value,
+                i=batch.id,
+            )
+    with tenant_session(app_engine, tenant_id=a) as s:
+        audited = s.execute(
+            text("select count(*) from cbam.audit_events where reason is not null")
+        ).scalar_one()
+    assert audited == 0
+
+
+def test_r1_003_advance_batch_follows_the_rule_writes_audit_and_checks_the_version(
     app_engine: Engine,
 ) -> None:
     a = make_tenant(app_engine, "A")
@@ -368,9 +575,9 @@ def test_advance_batch_follows_the_rule_writes_audit_and_checks_the_version(
             expected_version=2,
             actor=SYSTEM,
             now=NOW,
-            failure_reason="not a CDS report",
+            failure_reason="not_a_cds_report",
         )
-    assert done.failure_reason == "not a CDS report"
+    assert done.failure_reason == "not_a_cds_report"
     with pytest.raises(RuleBlockedError), tenant_session(app_engine, tenant_id=a) as s:
         service.advance_batch(
             s,

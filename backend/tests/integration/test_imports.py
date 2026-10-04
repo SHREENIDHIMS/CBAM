@@ -19,9 +19,10 @@ from app.core.clock import FrozenClock, get_clock
 from app.core.config import Settings, get_settings
 from app.core.db import tenant_session
 from app.core.errors import PayloadTooLargeError
-from app.core.storage import InMemoryStore, content_key, get_object_store
+from app.core.storage import InMemoryStore, get_object_store
 from app.core.tenancy import get_engine_dep, get_verifier
 from app.main import create_app
+from app.modules.imports import service
 from app.modules.imports.api import _capped
 from tests.helpers_auth import bearer, verifier
 from tests.integration.conftest import make_member, make_tenant, make_user
@@ -94,7 +95,7 @@ def _count(engine: Engine, tenant: UUID, table: str) -> int:
         return int(s.execute(text(f"select count(*) from cbam.{table}")).scalar_one())  # noqa: S608
 
 
-def test_imp_01_new_file_is_accepted_and_stored_with_its_hash(
+def test_imp_01_r1_003_new_file_is_accepted_and_stored_with_its_hash(
     client: TestClient, app_engine: Engine, store: InMemoryStore
 ) -> None:
     t = make_tenant(app_engine)
@@ -116,12 +117,18 @@ def test_imp_01_new_file_is_accepted_and_stored_with_its_hash(
     assert body["rows_total"] == 0
     assert r.headers["etag"] == '"1"'
     assert r.headers["location"].endswith(f"/import-batches/{body['id']}")
-    assert store.objects == {content_key(t, sha): CSV}
+    assert list(store.objects.values()) == [CSV]
+    (stored_key,) = store.objects
+    assert stored_key.startswith(f"tenants/{t}/")
+    assert sha not in stored_key  # random key: nothing about the content is in it
+    with tenant_session(app_engine, tenant_id=t) as s:
+        row = s.execute(text("select storage_key, sha256 from cbam.document_versions")).one()
+    assert (row.storage_key, row.sha256) == (stored_key, sha)
     assert _count(app_engine, t, "documents") == 1
     assert _count(app_engine, t, "document_versions") == 1
 
 
-def test_imp_01_same_file_twice_gives_one_batch_and_a_replay(
+def test_imp_01_r1_003_same_file_twice_gives_one_batch_and_a_replay(
     client: TestClient, app_engine: Engine, store: InMemoryStore
 ) -> None:
     t = make_tenant(app_engine)
@@ -144,7 +151,7 @@ def test_imp_01_same_file_twice_gives_one_batch_and_a_replay(
     assert actions.count("import_batch.created") == 1
 
 
-def test_imp_01_the_same_bytes_in_another_tenant_are_a_separate_batch(
+def test_imp_01_r1_003_the_same_bytes_in_another_tenant_are_a_separate_batch(
     client: TestClient, app_engine: Engine, store: InMemoryStore
 ) -> None:
     a, b = make_tenant(app_engine, "A"), make_tenant(app_engine, "B")
@@ -153,10 +160,10 @@ def test_imp_01_the_same_bytes_in_another_tenant_are_a_separate_batch(
     assert (ra.status_code, rb.status_code) == (202, 202)
     assert ra.json()["id"] != rb.json()["id"]
     assert len(store.objects) == 2
-    assert all(key.split("/")[0] in (str(a), str(b)) for key in store.objects)
+    assert sorted(k.split("/")[1] for k in store.objects) == sorted([str(a), str(b)])
 
 
-def test_imp_01_idempotency_key_replays_the_same_request(
+def test_imp_01_r1_003_idempotency_key_replays_the_same_request(
     client: TestClient, app_engine: Engine
 ) -> None:
     t = make_tenant(app_engine)
@@ -168,7 +175,7 @@ def test_imp_01_idempotency_key_replays_the_same_request(
     assert _count(app_engine, t, "import_batches") == 1
 
 
-def test_imp_02_idempotency_key_reused_for_another_file_is_409(
+def test_imp_02_r1_003_idempotency_key_reused_for_another_file_is_409(
     client: TestClient, app_engine: Engine
 ) -> None:
     t = make_tenant(app_engine)
@@ -180,7 +187,7 @@ def test_imp_02_idempotency_key_reused_for_another_file_is_409(
     assert _count(app_engine, t, "import_batches") == 1
 
 
-def test_imp_02_same_bytes_with_different_declared_details_is_409(
+def test_imp_02_r1_003_same_bytes_with_different_declared_details_is_409(
     client: TestClient, app_engine: Engine, store: InMemoryStore
 ) -> None:
     t = make_tenant(app_engine)
@@ -206,7 +213,7 @@ def test_imp_02_same_bytes_with_different_declared_details_is_409(
         "mrn,desc\nA1,é".encode()[:-1],  # a cut-off multi-byte character
     ],
 )
-def test_imp_03_binary_or_non_utf8_content_is_refused_before_storing(
+def test_imp_03_r1_003_binary_or_non_utf8_content_is_refused_before_storing(
     client: TestClient, app_engine: Engine, store: InMemoryStore, data: bytes
 ) -> None:
     t = make_tenant(app_engine)
@@ -219,7 +226,7 @@ def test_imp_03_binary_or_non_utf8_content_is_refused_before_storing(
     assert _count(app_engine, t, "documents") == 0
 
 
-def test_imp_03_empty_or_headerless_files_are_422(
+def test_imp_03_r1_003_empty_or_headerless_files_are_422(
     client: TestClient, app_engine: Engine, store: InMemoryStore
 ) -> None:
     t = make_tenant(app_engine)
@@ -229,7 +236,7 @@ def test_imp_03_empty_or_headerless_files_are_422(
     assert store.objects == {}
 
 
-def test_imp_03_oversize_file_is_413_problem_json(
+def test_imp_03_r1_003_oversize_file_is_413_problem_json(
     client: TestClient, app_engine: Engine, store: InMemoryStore
 ) -> None:
     t = make_tenant(app_engine)
@@ -247,7 +254,7 @@ def test_imp_03_oversize_file_is_413_problem_json(
     assert _upload(client, t, user, data=exact).status_code == 202
 
 
-def test_request_body_is_cut_off_without_a_content_length() -> None:
+def test_r1_003_request_body_is_cut_off_without_a_content_length() -> None:
     async def body():  # type: ignore[no-untyped-def]
         for _ in range(10):
             yield b"x" * 1000
@@ -275,7 +282,7 @@ def test_request_body_is_cut_off_without_a_content_length() -> None:
         ({"window_start": "not-a-date"}, "window_start"),
     ],
 )
-def test_declared_details_are_validated(
+def test_r1_003_declared_details_are_validated(
     client: TestClient,
     app_engine: Engine,
     store: InMemoryStore,
@@ -291,7 +298,7 @@ def test_declared_details_are_validated(
     assert any(field in e["loc"] or field in e["msg"] for e in r.json()["errors"])
 
 
-def test_future_acquisition_date_and_missing_file_are_422(
+def test_r1_003_future_acquisition_date_and_missing_file_are_422(
     client: TestClient, app_engine: Engine
 ) -> None:
     t = make_tenant(app_engine)
@@ -303,7 +310,7 @@ def test_future_acquisition_date_and_missing_file_are_422(
     assert r.status_code == 415
 
 
-def test_only_the_method_is_required_and_filenames_are_sanitised(
+def test_r1_003_only_the_method_is_required_and_filenames_are_sanitised(
     client: TestClient, app_engine: Engine, store: InMemoryStore
 ) -> None:
     t = make_tenant(app_engine)
@@ -317,7 +324,7 @@ def test_only_the_method_is_required_and_filenames_are_sanitised(
     assert all("evil" not in key for key in store.objects)
 
 
-def test_audit_event_is_written_with_no_filename_or_file_content(
+def test_r1_003_audit_event_is_written_with_no_filename_or_file_content(
     client: TestClient, app_engine: Engine
 ) -> None:
     t = make_tenant(app_engine)
@@ -339,7 +346,7 @@ def test_audit_event_is_written_with_no_filename_or_file_content(
     assert "mrn" not in row.after
 
 
-def test_get_and_list_import_batches_with_cursor_paging(
+def test_r1_003_get_and_list_import_batches_with_cursor_paging(
     client: TestClient, app_engine: Engine
 ) -> None:
     t = make_tenant(app_engine)
@@ -372,7 +379,7 @@ def test_get_and_list_import_batches_with_cursor_paging(
     assert bad.status_code == 422
 
 
-def test_another_tenants_batch_is_404_and_foreign_tenant_paths_are_404(
+def test_r1_003_another_tenants_batch_is_404_and_foreign_tenant_paths_are_404(
     client: TestClient, app_engine: Engine
 ) -> None:
     a, b = make_tenant(app_engine, "A"), make_tenant(app_engine, "B")
@@ -401,7 +408,7 @@ def test_another_tenants_batch_is_404_and_foreign_tenant_paths_are_404(
         ("supplier", False, False),
     ],
 )
-def test_permissions_imports_write_and_read(
+def test_r1_003_permissions_imports_write_and_read(
     client: TestClient, app_engine: Engine, role: str, can_write: bool, can_read: bool
 ) -> None:
     t = make_tenant(app_engine)
@@ -416,7 +423,7 @@ def test_permissions_imports_write_and_read(
         assert write.headers["content-type"].startswith("application/problem+json")
 
 
-def test_no_token_is_401_and_nothing_is_stored(
+def test_r1_003_no_token_is_401_and_nothing_is_stored(
     client: TestClient, app_engine: Engine, store: InMemoryStore
 ) -> None:
     t = make_tenant(app_engine)
@@ -425,7 +432,7 @@ def test_no_token_is_401_and_nothing_is_stored(
     assert store.objects == {}
 
 
-def test_unconfigured_storage_is_503_problem_json(app_engine: Engine) -> None:
+def test_r1_003_unconfigured_storage_is_503_problem_json(app_engine: Engine) -> None:
     app = create_app()
     app.dependency_overrides[get_verifier] = verifier
     app.dependency_overrides[get_engine_dep] = lambda: app_engine
@@ -438,3 +445,107 @@ def test_unconfigured_storage_is_503_problem_json(app_engine: Engine) -> None:
     assert r.status_code == 503
     assert r.headers["content-type"].startswith("application/problem+json")
     assert _count(app_engine, t, "import_batches") == 0
+
+
+def _move_batch(engine: Engine, tenant: UUID, batch_id: str, status: str) -> None:
+    with tenant_session(engine, tenant_id=tenant) as s:
+        s.execute(
+            text("update cbam.import_batches set status = :s where id = :i"),
+            {"s": status, "i": UUID(batch_id)},
+        )
+
+
+@pytest.mark.parametrize("status", ["failed", "rejected"])
+def test_imp_04_r1_003_the_same_bytes_after_a_failed_or_rejected_batch_make_a_new_batch(
+    client: TestClient, app_engine: Engine, store: InMemoryStore, status: str
+) -> None:
+    t = make_tenant(app_engine)
+    user = _user(app_engine, t)
+    old = _upload(client, t, user, **{"Idempotency-Key": "same-key"}).json()
+    _move_batch(app_engine, t, old["id"], status)
+    again = _upload(client, t, user, **{"Idempotency-Key": "same-key"})
+    assert again.status_code == 202, again.text
+    assert again.json()["replayed"] is False
+    assert again.json()["id"] != old["id"]
+    assert again.json()["document_version_id"] != old["document_version_id"]
+    assert _count(app_engine, t, "import_batches") == 2
+    assert len(store.objects) == 2
+    # The old batch stays as history, untouched.
+    assert client.get(_url(t, old["id"]), headers=_h(user)).json()["status"] == status
+    # And the new, live batch replays as usual.
+    third = _upload(client, t, user)
+    assert (third.status_code, third.json()["id"]) == (200, again.json()["id"])
+
+
+@pytest.mark.parametrize("status", ["completed", "completed_with_errors"])
+def test_imp_04_r1_003_the_same_bytes_after_a_completed_batch_is_a_replay(
+    client: TestClient, app_engine: Engine, status: str
+) -> None:
+    t = make_tenant(app_engine)
+    user = _user(app_engine, t)
+    old = _upload(client, t, user).json()
+    _move_batch(app_engine, t, old["id"], status)
+    again = _upload(client, t, user)
+    assert again.status_code == 200
+    assert again.json()["replayed"] is True
+    assert again.json()["id"] == old["id"]
+    assert _count(app_engine, t, "import_batches") == 1
+
+
+def test_imp_05_r1_003_a_different_idempotency_key_for_a_known_file_replays_and_ignores_the_key(
+    client: TestClient, app_engine: Engine
+) -> None:
+    t = make_tenant(app_engine)
+    user = _user(app_engine, t)
+    first = _upload(client, t, user, **{"Idempotency-Key": "first"})
+    second = _upload(client, t, user, **{"Idempotency-Key": "second"})
+    assert (first.status_code, second.status_code) == (202, 200)
+    assert second.json()["id"] == first.json()["id"]
+    with tenant_session(app_engine, tenant_id=t) as s:
+        keys = s.execute(text("select idempotency_key from cbam.import_batches")).scalars().all()
+    assert keys == ["first"]
+
+
+@pytest.mark.parametrize("bad", ["", "has space", "tab\there", "x" * 201, "caf\u00e9"])
+def test_imp_06_r1_003_a_bad_idempotency_key_header_is_422(
+    client: TestClient, app_engine: Engine, store: InMemoryStore, bad: str
+) -> None:
+    t = make_tenant(app_engine)
+    user = _user(app_engine, t)
+    try:
+        r = _upload(client, t, user, **{"Idempotency-Key": bad})
+    except UnicodeEncodeError:  # a non-ASCII header cannot even be sent
+        return
+    assert r.status_code == 422, r.text
+    assert r.headers["content-type"].startswith("application/problem+json")
+    assert store.objects == {}
+    assert _count(app_engine, t, "import_batches") == 0
+
+
+def test_imp_07_r1_003_concurrent_uploads_per_tenant_are_capped_with_429(
+    client: TestClient, app_engine: Engine, store: InMemoryStore
+) -> None:
+    t = make_tenant(app_engine)
+    other = make_tenant(app_engine, "Other")
+    user, other_user = _user(app_engine, t), _user(app_engine, other)
+    client.app.dependency_overrides[get_settings] = lambda: Settings(  # type: ignore[attr-defined]
+        import_max_file_bytes=MAX_BYTES, import_max_concurrent_uploads_per_tenant=2
+    )
+    service.upload_limiter.acquire(t, 2)
+    service.upload_limiter.acquire(t, 2)
+    try:
+        r = _upload(client, t, user)
+        assert r.status_code == 429, r.text
+        assert r.headers["content-type"].startswith("application/problem+json")
+        assert r.headers["retry-after"] == "5"
+        assert store.objects == {}
+        # Another client is not affected.
+        assert _upload(client, other, other_user).status_code == 202
+    finally:
+        service.upload_limiter.release(t)
+        service.upload_limiter.release(t)
+    assert service.upload_limiter.active(t) == 0
+    assert _upload(client, t, user).status_code == 202
+    assert service.upload_limiter.active(t) == 0  # released after success and after errors
+    assert _upload(client, t, user, data=b"\x00bin").status_code == 415
+    assert service.upload_limiter.active(t) == 0

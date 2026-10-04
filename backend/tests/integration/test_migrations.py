@@ -72,9 +72,15 @@ def test_0009_import_tables_are_removed_by_downgrade_and_come_back(
     cfg = _config(monkeypatch)
     cfg.set_main_option("script_location", str(BACKEND / "migrations"))
     command.upgrade(cfg, "head")
-    tables = "('documents','document_versions','import_batches')"
-    count = f"select count(*) from information_schema.tables where table_schema = 'cbam' and table_name in {tables}"  # noqa: S608
-    functions = "select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'cbam' and p.proname like any (array['import_batches_%', 'documents_block_change'])"
+    count = (
+        "select count(*) from information_schema.tables where table_schema = 'cbam' "
+        "and table_name in ('documents','document_versions','import_batches')"
+    )
+    functions = (
+        "select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace "
+        "where n.nspname = 'cbam' and p.proname like any "
+        "(array['import_batches_%', 'documents_block_change'])"
+    )
     assert _scalar(count) == 3
     assert _scalar(functions) == 3
     command.downgrade(cfg, "0008")

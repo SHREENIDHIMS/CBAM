@@ -26,13 +26,14 @@ create table cbam.documents (
   id uuid primary key,
   tenant_id uuid not null references cbam.tenants (id),
   created_at timestamptz not null default now(),
-  created_by uuid
+  created_by uuid,
+  unique (tenant_id, id)     -- target of the composite tenant foreign keys below
 );
 
 create table cbam.document_versions (
   id uuid primary key,
   tenant_id uuid not null references cbam.tenants (id),
-  document_id uuid not null references cbam.documents (id),
+  document_id uuid not null,
   version integer not null default 1 check (version >= 1),
   storage_key text not null check (length(btrim(storage_key)) > 0),
   sha256 char(64) not null check (sha256 ~ '^[0-9a-f]{64}$'),
@@ -44,7 +45,9 @@ create table cbam.document_versions (
   scan_state text not null default 'not_scanned'
     check (scan_state in ('not_scanned','pending','clean','infected')),
   uploaded_at timestamptz not null default now(),
-  unique (document_id, version)
+  unique (document_id, version),
+  unique (tenant_id, id),
+  foreign key (tenant_id, document_id) references cbam.documents (tenant_id, id)
 );
 create index document_versions_sha on cbam.document_versions (tenant_id, sha256);
 
@@ -61,7 +64,7 @@ create table cbam.import_batches (
   id uuid primary key,
   tenant_id uuid not null references cbam.tenants (id),
   file_sha256 char(64) check (file_sha256 ~ '^[0-9a-f]{64}$'),   -- null for manual entry
-  document_version_id uuid references cbam.document_versions (id),
+  document_version_id uuid,
   filename text check (length(filename) <= 255),
   acquisition_method text not null check (acquisition_method in
     ('get_customs_data','cds_export','data_request','manual_upload','manual_entry','feed')),
@@ -83,7 +86,7 @@ create table cbam.import_batches (
   rows_rejected integer not null default 0 check (rows_rejected >= 0),
   lines_created integer not null default 0 check (lines_created >= 0),
   lines_unchanged integer not null default 0 check (lines_unchanged >= 0),
-  failure_reason text,
+  failure_reason text check (failure_reason ~ '^[a-z0-9_]{1,64}$'),  -- a code, never parser text
   created_at timestamptz not null default now(),
   created_by uuid,
   updated_at timestamptz,
@@ -91,12 +94,16 @@ create table cbam.import_batches (
   check (window_end is null or window_start is not null),
   check (window_end >= window_start),
   check ((file_sha256 is null) = (document_version_id is null)),
-  check (acquisition_method <> 'manual_entry' or file_sha256 is null)
+  check (acquisition_method <> 'manual_entry' or file_sha256 is null),
+  foreign key (tenant_id, document_version_id) references cbam.document_versions (tenant_id, id)
 );
+-- A failed or rejected batch is history: it does not block sending the same bytes (or key) again.
 create unique index import_batches_tenant_sha
-  on cbam.import_batches (tenant_id, file_sha256) where file_sha256 is not null;
+  on cbam.import_batches (tenant_id, file_sha256)
+  where file_sha256 is not null and status not in ('failed','rejected');
 create unique index import_batches_tenant_idem
-  on cbam.import_batches (tenant_id, idempotency_key) where idempotency_key is not null;
+  on cbam.import_batches (tenant_id, idempotency_key)
+  where idempotency_key is not null and status not in ('failed','rejected');
 create index import_batches_tenant_created on cbam.import_batches (tenant_id, id desc);
 
 -- Status moves forward only; terminal batches are locked; source facts never change.

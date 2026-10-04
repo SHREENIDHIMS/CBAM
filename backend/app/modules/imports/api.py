@@ -87,6 +87,22 @@ async def create_import_batch(
     """Upload a customs file. 202 for a new batch, 200 with `replayed: true` for a file that
     was already received (same SHA-256 and same declared details)."""
     max_bytes = settings.import_max_file_bytes
+    service.upload_limiter.acquire(ctx.tenant_id, settings.import_max_concurrent_uploads_per_tenant)
+    try:
+        return await _receive(request, response, ctx, clock, store, idempotency_key, max_bytes)
+    finally:
+        service.upload_limiter.release(ctx.tenant_id)
+
+
+async def _receive(
+    request: Request,
+    response: Response,
+    ctx: TenantContext,
+    clock: Clock,
+    store: ObjectStore,
+    idempotency_key: str | None,
+    max_bytes: int,
+) -> ImportBatchCreated:
     if idempotency_key is not None and not _IDEMPOTENCY_KEY.match(idempotency_key):
         raise InvalidRequestError("Idempotency-Key must be 1 to 200 visible ASCII characters")
     declared = request.headers.get("content-length")
@@ -121,20 +137,19 @@ async def create_import_batch(
 
         def work() -> ImportBatchCreated:
             scanned = service.scan_upload(upload.file, max_bytes=max_bytes)
-            with ctx.session() as s:
-                return service.receive_file(
-                    s,
-                    store=store,
-                    tenant_id=ctx.tenant_id,
-                    actor=actor,
-                    now=now,
-                    as_of=as_of,
-                    file=upload.file,
-                    scanned=scanned,
-                    filename=upload.filename,
-                    metadata=metadata,
-                    idempotency_key=idempotency_key,
-                )
+            return service.receive_file(
+                ctx.session,
+                store=store,
+                tenant_id=ctx.tenant_id,
+                actor=actor,
+                now=now,
+                as_of=as_of,
+                file=upload.file,
+                scanned=scanned,
+                filename=upload.filename,
+                metadata=metadata,
+                idempotency_key=idempotency_key,
+            )
 
         result = await run_in_threadpool(work)
     finally:
@@ -154,7 +169,7 @@ def list_import_batches(
     cursor: str | None = None,
 ) -> ImportBatchPage:
     with ctx.session() as s:
-        return service.list_batches(s, status=status, limit=limit, cursor=cursor)
+        return service.list_batches(s, ctx.tenant_id, status=status, limit=limit, cursor=cursor)
 
 
 @router.get("/{batch_id}", response_model=ImportBatchOut)
@@ -164,6 +179,6 @@ def get_import_batch(
     ctx: Annotated[TenantContext, Depends(require("imports:read"))],
 ) -> ImportBatchOut:
     with ctx.session() as s:
-        batch = service.get_batch(s, batch_id)
+        batch = service.get_batch(s, ctx.tenant_id, batch_id)
     response.headers["ETag"] = etag(batch.row_version)
     return batch

@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 
-from pydantic import SecretStr, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PRODUCTION_SECONDS_PER_DAY = 86400
@@ -32,9 +32,12 @@ class Settings(BaseSettings):
     task_escalation_overdue_days: tuple[int, ...] = (7, 14, 28)
     # Supabase Storage (private buckets; the backend signs URLs, the frontend never lists).
     supabase_storage_bucket_imports: str = "customs-imports"
-    signed_url_ttl_seconds: int = 300
+    # docs/SECURITY.md: signed URLs live at most 5 minutes.
+    signed_url_ttl_seconds: int = Field(default=300, ge=1, le=300)
     # Operational limit for one uploaded customs file (bytes). Not law: tune per environment.
     import_max_file_bytes: int = 52_428_800
+    # Uploads one client may have in flight at once in this process (429 above it).
+    import_max_concurrent_uploads_per_tenant: int = Field(default=3, ge=1)
     sentry_dsn: str = ""
     sentry_environment: str = "local"
     # R1-053: seconds that count as one "day" in the outreach schedule.

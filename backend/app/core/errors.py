@@ -96,6 +96,14 @@ class UnsupportedMediaError(DomainError):
     title = "This kind of file is not accepted"
 
 
+class TooManyRequestsError(DomainError):
+    """The caller has too many of this kind of request in flight (429)."""
+
+    status = 429
+    title = "Too many requests in progress"
+    headers = {"Retry-After": "5"}  # noqa: RUF012
+
+
 class IdempotencyConflictError(DomainError):
     """The same file or Idempotency-Key was already used with different details (409)."""
 
