@@ -12,8 +12,9 @@ import csv
 import io
 import json
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
 import pytest
@@ -823,7 +824,7 @@ def test_imp_16_r1_025_exception_endpoints_need_imports_read_and_stay_in_the_ten
     )  # not a member
 
 
-def test_imp_16_r1_003_a_new_upload_is_queued_and_a_replay_only_if_its_job_never_started(
+def test_imp_16_r1_003_a_new_upload_is_queued_and_an_overdue_unprocessed_replay_is_queued_again(
     client: TestClient, app_engine: Engine, queued: list[tuple[UUID, UUID]], layout: UUID
 ) -> None:
     tenant = make_tenant(app_engine, "A")
@@ -845,8 +846,20 @@ def test_imp_16_r1_003_a_new_upload_is_queued_and_a_replay_only_if_its_job_never
         headers=headers,
     )
     assert again.status_code == 200 and again.json()["replayed"] is True
-    # still `received`: the job may have been lost, so the replay queues it again (idempotent)
-    assert queued == [(tenant, UUID(first.json()["id"]))] * 2
+    # still `received` but inside the stale window: not queued again (the sweeper owns it)
+    assert queued == [(tenant, UUID(first.json()["id"]))]
+    later = create_app()
+    later.dependency_overrides.update(client.app.dependency_overrides)
+    later.dependency_overrides[get_clock] = lambda: FrozenClock(NOW + timedelta(hours=1))
+    with TestClient(later) as c2:
+        overdue = c2.post(
+            url(tenant, "")[:-1],
+            files={"file": ("a.csv", data, "text/csv")},
+            data=meta,
+            headers=headers,
+        )
+    assert overdue.json()["replayed"] is True
+    assert len(queued) == 2  # overdue and still unprocessed: queued again (idempotent job)
 
 
 def test_imp_16_r1_003_a_broker_outage_does_not_fail_an_accepted_upload(
@@ -1543,8 +1556,6 @@ def test_imp_20_r1_003_a_stale_received_batch_is_requeued_by_the_sweeper_and_the
     app_engine: Engine, store: InMemoryStore, layout: UUID
 ) -> None:
     """Broker outage at upload leaves the batch `received`; the beat sweeper recovers it."""
-    from datetime import timedelta
-
     from app.modules.imports.jobs import sweep_stale
 
     def broken(_t: UUID, _b: UUID) -> None:
@@ -1660,3 +1671,267 @@ def test_imp_21_r1_025_a_huge_or_negative_cursor_is_a_clean_422(
             url(tenant, batch.id, "/exceptions"), params={"cursor": cursor}, headers=headers
         )
         assert response.status_code == 422, r
+
+
+# --- leases, takeovers, duplicate deliveries, quoted-newline records ----------------------------
+
+
+class Killed(BaseException):
+    """A worker killed mid-file (SIGKILL/OOM): not an Exception, so no cleanup code runs."""
+
+
+def kill(_rows: int) -> None:
+    raise Killed()
+
+
+def at(minutes: float) -> FrozenClock:
+    return FrozenClock(NOW + timedelta(minutes=minutes))
+
+
+def sweep(engine: Engine, clock: FrozenClock) -> set[tuple[UUID, UUID]]:
+    from app.modules.imports.jobs import sweep_stale
+
+    sent: list[tuple[UUID, UUID]] = []
+    sweep_stale(engine, clock, lambda t, b: sent.append((t, b)), minutes=10)
+    return set(sent)
+
+
+def test_imp_22_r1_003_a_killed_worker_is_taken_over_after_its_lease_expires(
+    app_engine: Engine, layout: UUID
+) -> None:
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    data, expected = seeded_file(total=60, bad=5)
+    batch = receive(app_engine, store, tenant, data)
+    with pytest.raises(Killed):
+        run(app_engine, store, tenant, batch.id, chunk_rows=20, after_chunk=kill)
+    mid = batch_row(app_engine, tenant, batch.id)
+    assert (mid.status, mid.attempts, mid.rows_total) == ("validating", 1, 20)
+    assert mid.lease_expires_at == NOW + timedelta(seconds=300)
+
+    # inside the lease: a duplicate delivery and the sweeper both leave it alone
+    assert (tenant, batch.id) not in sweep(app_engine, at(1))
+    assert run(app_engine, store, tenant, batch.id, clock=at(1)) == "validating"
+    after_dup = batch_row(app_engine, tenant, batch.id)
+    assert (after_dup.attempts, after_dup.rows_total) == (1, 20)
+
+    # lease expired: the sweeper queues it, and the job takes over and finishes
+    assert (tenant, batch.id) in sweep(app_engine, at(6))
+    assert run(app_engine, store, tenant, batch.id, clock=at(6), chunk_rows=20) == (
+        "completed_with_errors"
+    )
+    done = batch_row(app_engine, tenant, batch.id)
+    assert (done.attempts, done.rows_total) == (2, 60)
+    assert exceptions(app_engine, tenant, batch.id) == expected_set(expected)
+    assert (tenant, batch.id) not in sweep(app_engine, at(60))  # finished: never swept again
+
+
+def test_imp_22_r1_003_repeated_takeovers_end_in_a_crash_loop_failure(
+    app_engine: Engine, layout: UUID
+) -> None:
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    batch = receive(app_engine, store, tenant, to_csv([good_row(i) for i in range(1, 9)]))
+    two = limits(max_attempts=2)
+    for minute in (0, 10):
+        with pytest.raises(Killed):
+            run(
+                app_engine,
+                store,
+                tenant,
+                batch.id,
+                clock=at(minute),
+                chunk_rows=2,
+                after_chunk=kill,
+                limits=two,
+            )
+    assert (tenant, batch.id) in sweep(app_engine, at(20))
+    assert run(app_engine, store, tenant, batch.id, clock=at(20), limits=two) == "failed"
+    row = batch_row(app_engine, tenant, batch.id)
+    assert (row.status, row.failure_reason, row.attempts) == ("failed", "worker_crash_loop", 3)
+    assert (tenant, batch.id) not in sweep(app_engine, at(40))
+
+
+def test_imp_22_r1_003_duplicate_deliveries_and_sweeps_never_fail_a_healthy_slow_batch(
+    app_engine: Engine, layout: UUID
+) -> None:
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    batch = receive(app_engine, store, tenant, to_csv([good_row(i) for i in range(1, 9)]))
+    with pytest.raises(Killed):
+        run(
+            app_engine,
+            store,
+            tenant,
+            batch.id,
+            chunk_rows=2,
+            after_chunk=kill,
+            limits=limits(max_attempts=2),
+        )
+    for step in range(20):  # a sweeper and redeliveries every few seconds for the lease length
+        clock = FrozenClock(NOW + timedelta(seconds=10 * step))
+        assert (
+            run(app_engine, store, tenant, batch.id, clock=clock, limits=limits(max_attempts=2))
+            == "validating"
+        )
+    row = batch_row(app_engine, tenant, batch.id)
+    assert (row.status, row.attempts, row.rows_total) == ("validating", 1, 2)
+
+
+def test_imp_22_r1_003_two_jobs_started_together_parse_once(
+    app_engine: Engine, layout: UUID
+) -> None:
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    data, expected = seeded_file(total=200, bad=6)
+    batch = receive(app_engine, store, tenant, data)
+    with ThreadPoolExecutor(2) as pool:
+        results = list(
+            pool.map(lambda _: run(app_engine, store, tenant, batch.id, chunk_rows=50), range(2))
+        )
+    assert set(results) <= {"completed_with_errors", "validating", "parsing"}
+    row = batch_row(app_engine, tenant, batch.id)
+    assert (row.status, row.attempts, row.rows_total) == ("completed_with_errors", 1, 200)
+    assert exceptions(app_engine, tenant, batch.id) == expected_set(expected)
+    chunks = scalar(
+        app_engine,
+        tenant,
+        "select count(*) from cbam.audit_events where action = 'import_batch.rows_processed'",
+    )
+    assert chunks == 4  # each chunk audited once: no parallel duplicate work
+
+
+def test_imp_22_r1_003_the_lease_is_renewed_after_every_chunk(
+    app_engine: Engine, layout: UUID
+) -> None:
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    batch = receive(app_engine, store, tenant, to_csv([good_row(i) for i in range(1, 7)]))
+    clock = FrozenClock(NOW)
+    seen: list[object] = []
+
+    def tick(_rows: int) -> None:
+        seen.append(batch_row(app_engine, tenant, batch.id).lease_expires_at)
+        clock.advance(timedelta(seconds=100))
+
+    assert (
+        process_batch(app_engine, store, clock, tenant, batch.id, chunk_rows=2, after_chunk=tick)
+        == "completed"
+    )
+    assert seen == [
+        NOW + timedelta(seconds=300),
+        NOW + timedelta(seconds=400),
+        NOW + timedelta(seconds=500),
+    ]
+
+
+def test_imp_22_r1_003_a_failed_attempt_releases_the_lease_so_a_retry_can_start_at_once(
+    app_engine: Engine, layout: UUID
+) -> None:
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    batch = receive(app_engine, store, tenant, to_csv([good_row(i) for i in range(1, 5)]))
+
+    def boom(_rows: int) -> None:
+        raise RuntimeError("transient")
+
+    with pytest.raises(ImportJobError):
+        run(app_engine, store, tenant, batch.id, chunk_rows=2, after_chunk=boom)
+    assert run(app_engine, store, tenant, batch.id, chunk_rows=2) == "completed"  # same instant
+    assert batch_row(app_engine, tenant, batch.id).attempts == 2
+
+
+def test_imp_22_r1_003_attempts_can_never_go_down_but_the_lease_can_move_either_way(
+    app_engine: Engine, admin_engine: Engine, layout: UUID
+) -> None:
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    batch = receive(app_engine, store, tenant, to_csv([good_row(1)]))
+    with pytest.raises(Killed):
+        run(app_engine, store, tenant, batch.id, chunk_rows=1, after_chunk=kill)
+    for engine_ctx in ("app", "owner"):
+        statement = "update cbam.import_batches set attempts = attempts - 1 where id = :i"
+        if engine_ctx == "app":
+            with pytest.raises(DBAPIError, match="cannot go down"):
+                sql(app_engine, tenant, statement, i=batch.id)
+        else:
+            with (
+                pytest.raises(DBAPIError, match="cannot go down"),
+                owner(admin_engine, tenant) as s,
+            ):
+                s.execute(text(statement), {"i": batch.id})
+    assert (
+        sql(
+            app_engine,
+            tenant,
+            "update cbam.import_batches set lease_expires_at = lease_expires_at - interval '1 hour' where id = :i",
+            i=batch.id,
+        )
+        == 1
+    )
+
+
+def test_imp_22_r1_025_reject_does_nothing_when_the_batch_is_already_final(
+    app_engine: Engine, layout: UUID
+) -> None:
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    batch, _ = processed_batch(app_engine, store, tenant, total=5, bad=1)
+    before = exceptions(app_engine, tenant, batch.id)
+    status = processing._reject(
+        app_engine, CLOCK, tenant, batch.id, [processing.rules.Issue("FILE_UNREADABLE", "")], None
+    )
+    assert status == "completed_with_errors"
+    assert exceptions(app_engine, tenant, batch.id) == before
+
+
+def test_imp_22_r1_025_the_csv_cell_limit_is_restored_after_the_job(
+    app_engine: Engine, layout: UUID
+) -> None:
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    before = csv.field_size_limit()
+    batch = receive(app_engine, store, tenant, to_csv([good_row(1)]))
+    run(app_engine, store, tenant, batch.id, limits=limits(max_cell_chars=777))
+    assert csv.field_size_limit() == before
+    failing = receive(app_engine, store, tenant, to_csv([good_row(2)]))
+    store.objects.clear()
+    with pytest.raises(ImportJobError):
+        run(app_engine, store, tenant, failing.id, limits=limits(max_cell_chars=777))
+    assert csv.field_size_limit() == before
+
+
+def test_imp_23_r1_025_a_record_hiding_newlines_in_quotes_is_rejected_by_the_row_and_column_caps(
+    app_engine: Engine, layout: UUID
+) -> None:
+    """Security H1: one record of hundreds of thousands of two-line quoted cells."""
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    attack = '"x\n' + 'y","x\n' * 300_000 + 'y"\n'
+    data = (",".join(HEADERS) + "\n" + ",".join(good_row(1)) + "\n" + attack).encode()
+    batch = receive(app_engine, store, tenant, data)
+    assert run(app_engine, store, tenant, batch.id) == "rejected"
+    assert exceptions(app_engine, tenant, batch.id) == {(0, "", "ROW_TOO_LARGE")}
+    assert batch_row(app_engine, tenant, batch.id).rows_total == 1  # the row before it is kept
+
+    one_cell = ",".join(HEADERS) + "\n" + '"' + "line\n" * 400_000 + '"\n'
+    endless = receive(app_engine, store, tenant, one_cell.encode())
+    assert run(app_engine, store, tenant, endless.id) == "rejected"  # one endless quoted cell
+    assert exceptions(app_engine, tenant, endless.id) == {(0, "", "FILE_UNREADABLE")}  # cell cap
+
+    header_attack = 'a,"x\n' + 'y","x\n' * 300_000 + 'y"\n1,2\n'
+    head = receive(app_engine, store, tenant, header_attack.encode())
+    assert run(app_engine, store, tenant, head.id) == "rejected"
+    assert exceptions(app_engine, tenant, head.id) == {(0, "", "HEADER_TOO_MANY_COLUMNS")}
+
+
+def test_imp_23_r1_025_honest_quoted_newlines_doubled_quotes_crlf_and_bom_still_import(
+    app_engine: Engine, layout: UUID
+) -> None:
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    rows = []
+    for i in range(1, 6):
+        row = good_row(i)
+        row[11] = f'say "hi"\r\nsecond line {i}\n, third'
+        rows.append(row)
+    out = io.StringIO(newline="")
+    writer = csv.writer(out, lineterminator="\r\n")
+    writer.writerow(HEADERS)
+    writer.writerows(rows)
+    data = b"\xef\xbb\xbf" + out.getvalue().encode()
+    batch = receive(app_engine, store, tenant, data)
+    assert run(app_engine, store, tenant, batch.id) == "completed"
+    raws = scalar(
+        app_engine, tenant, "select json_agg(raw order by row_number) from cbam.source_rows"
+    )
+    assert [r["SYNTH_DESCRIPTION"] for r in raws] == [r[11] for r in rows]  # type: ignore[union-attr]

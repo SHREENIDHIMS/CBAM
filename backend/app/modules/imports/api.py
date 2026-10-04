@@ -2,6 +2,7 @@ import csv
 import io
 import re
 from collections.abc import AsyncGenerator, AsyncIterator, Iterator
+from datetime import timedelta
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -99,8 +100,14 @@ async def create_import_batch(
         result = await _receive(request, response, ctx, clock, store, idempotency_key, max_bytes)
     finally:
         service.upload_limiter.release(ctx.tenant_id)
-    # A replay of a batch whose job never started is queued again (the job is idempotent).
-    if not result.replayed or result.status in ("received", "queued"):
+    # A replay of a batch whose job never started is queued again only once it is overdue (older
+    # than the stale window); the job is idempotent and the sweeper covers the rest.
+    overdue = (
+        result.status in ("received", "queued")
+        and result.created_at is not None
+        and clock.now() - result.created_at > timedelta(minutes=settings.import_stale_batch_minutes)
+    )
+    if not result.replayed or overdue:
         await run_in_threadpool(safe_enqueue, enqueue, ctx.tenant_id, result.id)
     return result
 

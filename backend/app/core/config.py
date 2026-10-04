@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     import_chunk_max_bytes: int = Field(default=8_388_608, ge=1)
     # A batch that has been started this many times is a crash loop: it is marked failed.
     import_max_attempts: int = Field(default=8, ge=1)
+    # A running job holds a lease this long and renews it after every chunk; an expired
+    # lease means the worker died and the sweeper may take the batch over.
+    import_lease_seconds: int = Field(default=300, ge=30)
     # Batches still received/queued after this long are re-queued by the sweeper.
     import_stale_batch_minutes: int = Field(default=10, ge=1)
     # Celery recycles a worker process above this much memory (KiB); 0 = off.

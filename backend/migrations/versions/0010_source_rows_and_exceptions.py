@@ -11,7 +11,7 @@ resolution columns can change, and only from `open` forward. Codes are short upp
 the message is fixed text per code: never a cell value (the report is exported).
 
 `import_batches` gains the reference-data layout version it was read with and a short
-`layout_status`, and an `attempts` counter (crash-loop guard). `ref_cds_report_layouts` gains an optional `date_format` (the format a layout
+`layout_status`, and an `attempts` counter (crash-loop guard, never decreases) and a `lease_expires_at` (worker lease). `ref_cds_report_layouts` gains an optional `date_format` (the format a layout
 declares for a date column); its `v_active_` view is rebuilt to expose it.
 """
 
@@ -28,7 +28,8 @@ alter table cbam.import_batches
   add column report_layout_version_id uuid references cbam.ref_dataset_versions (id),
   add column layout_status text
     check (layout_status in ('matched','not_active','columns_missing','unreadable','invalid')),
-  add column attempts integer not null default 0 check (attempts >= 0);
+  add column attempts integer not null default 0 check (attempts >= 0),
+  add column lease_expires_at timestamptz;   -- renewed by the running job; expiry = worker lost
 
 create or replace function cbam.import_batches_guard() returns trigger language plpgsql as $$
 declare
@@ -46,6 +47,9 @@ begin
   end if;
   if new.status <> old.status and new_rank <= old_rank then
     raise exception 'import batch status cannot move from % to %', old.status, new.status;
+  end if;
+  if new.attempts < old.attempts then
+    raise exception 'import batch attempts cannot go down';
   end if;
   if old.report_layout_version_id is not null
      and new.report_layout_version_id is distinct from old.report_layout_version_id then
@@ -240,6 +244,7 @@ begin
   return new;
 end $$;
 alter table cbam.import_batches
+  drop column lease_expires_at,
   drop column attempts,
   drop column layout_status,
   drop column report_layout_version_id;

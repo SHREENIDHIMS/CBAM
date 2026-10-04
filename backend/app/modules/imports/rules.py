@@ -404,6 +404,7 @@ class ImportLimits:
     max_row_chars: int
     chunk_max_chars: int
     max_attempts: int
+    lease_seconds: int
 
 
 def header_problem(cells: Sequence[str], limits: ImportLimits) -> str | None:
@@ -651,15 +652,89 @@ _CSV_FORMULA_START = (
     "\uff0d",
     "\uff20",
 )
-_CSV_SKIPPED = " \t\r\n\u00a0'\""
+_CSV_QUOTES = "'\""
 
 
 def csv_safe(value: str) -> str:
     """Stop spreadsheet formula injection: a cell that starts (after any spaces or quotes) with
     = + - @ ; | their fullwidth forms, or starts with tab, CR or LF, gets a leading apostrophe
     (docs/SECURITY.md files checklist). Applied to every exported cell."""
-    if value.startswith(("\t", "\r", "\n")) or value.lstrip(_CSV_SKIPPED).startswith(
-        _CSV_FORMULA_START
-    ):
+    start = 0
+    while start < len(value) and (value[start].isspace() or value[start] in _CSV_QUOTES):
+        start += 1
+    if value.startswith(("\t", "\r", "\n")) or value[start:].startswith(_CSV_FORMULA_START):
         return "'" + value
     return value
+
+
+class RecordLimitError(Exception):
+    """A CSV record broke a size limit. `code` is a file-level issue code, never content."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+class RecordGuard:
+    """Feeds physical lines and enforces limits on the CSV RECORD being built, so a record
+    cannot grow without bound by hiding newlines inside quotes (the csv module holds the whole
+    record in memory before returning it). Tracks quote state like the csv module does (a quote
+    only opens a quoted field at the start of a field; a doubled quote inside one is a literal
+    quote), the characters of the current record and the separators outside quotes.
+
+    The first non-blank record is the header: its limits give HEADER_TOO_LONG and
+    HEADER_TOO_MANY_COLUMNS; for data rows both give ROW_TOO_LARGE.
+    """
+
+    def __init__(self, *, max_record_chars: int, max_columns: int) -> None:
+        self._max_chars = max_record_chars
+        self._max_columns = max_columns
+        self._in_quote = False
+        self._at_start = True
+        self._after_quote = False
+        self._chars = 0
+        self._separators = 0
+        self._header_done = False
+        self._nonblank = False
+
+    def _fail(self, kind: str) -> RecordLimitError:
+        if self._header_done:
+            return RecordLimitError("ROW_TOO_LARGE")
+        return RecordLimitError("HEADER_TOO_LONG" if kind == "chars" else "HEADER_TOO_MANY_COLUMNS")
+
+    def feed(self, line: str) -> None:
+        """Account for one physical line; raises RecordLimitError past a limit."""
+        self._chars += len(line)
+        if self._chars > self._max_chars:
+            raise self._fail("chars")
+        if line.strip("\r\n"):
+            self._nonblank = True
+        if '"' in line:
+            self._scan(line)
+        elif not self._in_quote:
+            self._separators += line.count(",")
+        if self._separators >= self._max_columns:
+            raise self._fail("columns")
+        if not self._in_quote and line.endswith(("\n", "\r")):
+            self._header_done = self._header_done or self._nonblank
+            self._nonblank = False
+            self._chars = 0
+            self._separators = 0
+            self._at_start = True
+            self._after_quote = False
+
+    def _scan(self, line: str) -> None:
+        in_quote, at_start, after_quote = self._in_quote, self._at_start, self._after_quote
+        for ch in line:
+            if in_quote:
+                if ch == '"':
+                    in_quote, after_quote = False, True
+                continue
+            if ch == '"' and (at_start or after_quote):
+                in_quote, at_start, after_quote = True, False, False
+            elif ch == ",":
+                self._separators += 1
+                at_start, after_quote = True, False
+            else:
+                at_start, after_quote = False, False
+        self._in_quote, self._at_start, self._after_quote = in_quote, at_start, after_quote

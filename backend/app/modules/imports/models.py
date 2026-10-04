@@ -72,6 +72,7 @@ import_batches = Table(
     Column("report_layout_version_id", Uuid),
     Column("layout_status", Text),
     Column("attempts", Integer, nullable=False),
+    Column("lease_expires_at", DateTime(timezone=True)),
     Column("created_at", DateTime(timezone=True)),
     Column("created_by", Uuid),
     Column("updated_at", DateTime(timezone=True)),

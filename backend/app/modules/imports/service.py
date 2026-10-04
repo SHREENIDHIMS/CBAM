@@ -10,7 +10,7 @@ from datetime import date, datetime
 from typing import Any, BinaryIO
 from uuid import UUID
 
-from sqlalchemy import Row, func, insert, select, text, tuple_
+from sqlalchemy import Row, and_, func, insert, or_, select, text, tuple_
 from sqlalchemy.orm import Session
 
 from app.core.audit import ActorType, record
@@ -718,15 +718,31 @@ def retry_batch(
     return _created(row, replayed=False)
 
 
-def stale_batch_ids(session: Session, tenant_id: UUID, *, older_than: datetime) -> list[UUID]:
-    """Batches still `received` or `queued` since before `older_than`: their job was lost
-    (broker outage at upload, worker lost before it started)."""
+def stale_batch_ids(
+    session: Session, tenant_id: UUID, *, older_than: datetime, now: datetime
+) -> list[UUID]:
+    """Batches whose job was lost: still `received`/`queued` since before `older_than` (broker
+    outage at upload, worker lost before it started), or `parsing`/`validating`/`normalising`
+    with a lease that has expired at `now` (worker killed mid-file)."""
+    working = import_batches.c.status.in_(("parsing", "validating", "normalising"))
     rows = session.execute(
         select(import_batches.c.id)
         .where(
             import_batches.c.tenant_id == tenant_id,
-            import_batches.c.status.in_(("received", "queued")),
-            func.coalesce(import_batches.c.updated_at, import_batches.c.created_at) < older_than,
+            or_(
+                and_(
+                    import_batches.c.status.in_(("received", "queued")),
+                    func.coalesce(import_batches.c.updated_at, import_batches.c.created_at)
+                    < older_than,
+                ),
+                and_(
+                    working,
+                    or_(
+                        import_batches.c.lease_expires_at.is_(None),
+                        import_batches.c.lease_expires_at <= now,
+                    ),
+                ),
+            ),
         )
         .order_by(import_batches.c.id)
         .limit(1000)

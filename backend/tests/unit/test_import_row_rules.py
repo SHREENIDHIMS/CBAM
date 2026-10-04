@@ -4,6 +4,7 @@ Product rules, not law: no regulatory source applies. The layout columns below a
 names (DATA-DEC-002: the real HMRC layout is provisional until a masked report is available).
 """
 
+import io
 from decimal import Decimal
 
 import pytest
@@ -265,6 +266,7 @@ LIMITS = rules.ImportLimits(
     max_row_chars=50,
     chunk_max_chars=100,
     max_attempts=8,
+    lease_seconds=300,
 )
 
 
@@ -275,3 +277,109 @@ def test_r1_025_header_limits_give_file_level_codes() -> None:
     for code in ("HEADER_TOO_MANY_COLUMNS", "HEADER_TOO_LONG", "ROW_TOO_LARGE", "FILE_INFECTED"):
         assert code in rules.FILE_LEVEL_CODES and code in rules.ISSUES
     assert rules.row_chars(["ab", "c"]) == 5
+
+
+# --- record guard: limits hold even when newlines hide inside quotes -----------------------
+
+
+def _guard(chars: int = 10_000, columns: int = 50) -> rules.RecordGuard:
+    return rules.RecordGuard(max_record_chars=chars, max_columns=columns)
+
+
+def _feed_all(text_: str, guard: rules.RecordGuard) -> None:
+    for line in io.StringIO(text_, newline="").readlines():
+        guard.feed(line)
+
+
+def test_r1_025_a_record_spanning_many_quoted_lines_is_stopped_at_the_row_cap() -> None:
+    guard = _guard(chars=1000, columns=10_000)
+    with pytest.raises(rules.RecordLimitError) as caught:
+        guard.feed('"x\n')  # opens a quote and never closes it: one endless record
+        for _ in range(100_000):
+            guard.feed("x\n")
+    assert caught.value.code == "HEADER_TOO_LONG"  # the header is the first record
+    guard = _guard(chars=1000, columns=10_000)
+    guard.feed("h1,h2\n")
+    with pytest.raises(rules.RecordLimitError) as row:
+        guard.feed('"x\n')
+        for _ in range(100_000):
+            guard.feed("x\n")
+    assert row.value.code == "ROW_TOO_LARGE"
+
+
+def test_r1_025_many_two_line_quoted_cells_in_one_record_hit_the_column_cap() -> None:
+    guard = _guard(chars=10**9, columns=200)
+    guard.feed("a,b\n")
+    with pytest.raises(rules.RecordLimitError) as caught:
+        guard.feed('"x\n')
+        for _ in range(10**6):
+            guard.feed('y","x\n')  # closes one cell, separator, opens the next
+    assert caught.value.code == "ROW_TOO_LARGE"
+    header = _guard(chars=10**9, columns=200)
+    with pytest.raises(rules.RecordLimitError) as head:
+        header.feed(",".join("c" * 5 for _ in range(300)) + "\n")
+    assert head.value.code == "HEADER_TOO_MANY_COLUMNS"
+
+
+def test_r1_025_the_reader_never_buffers_more_than_the_cap_for_the_attack_shape() -> None:
+    """Peak memory stays small while a practically endless attack file is read lazily."""
+    import csv as csv_module
+    import tracemalloc
+
+    from app.modules.imports.processing import _bounded_lines
+
+    class Endless(io.TextIOBase):
+        def __init__(self) -> None:
+            self.sent = 0
+            self.first = True
+
+        def readline(self, size: int = -1) -> str:  # type: ignore[override]
+            self.sent += 1
+            if self.first:
+                self.first = False
+                return "a,b\n"
+            return 'y","x\n' if self.sent > 2 else '"x\n'
+
+    limits = rules.ImportLimits(
+        max_columns=200,
+        max_heading_chars=200,
+        max_cell_chars=4096,
+        max_row_chars=1_048_576,
+        chunk_max_chars=8_388_608,
+        max_attempts=8,
+        lease_seconds=300,
+    )
+    source = Endless()
+    tracemalloc.start()
+    with pytest.raises(rules.RecordLimitError):
+        for _ in csv_module.reader(_bounded_lines(source, limits)):
+            pass
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    assert peak < 5_000_000
+    assert source.sent < 500  # stopped by the column cap long before the row cap
+
+
+_CELL = st.text(alphabet=st.sampled_from(list('ab ,"\n\r;é')), max_size=20)
+
+
+@given(st.lists(st.lists(_CELL, min_size=1, max_size=6), min_size=1, max_size=8), st.booleans())
+def test_r1_025_legitimate_quoted_multiline_csv_still_parses_and_is_unchanged_by_the_guard(
+    rows: list[list[str]], crlf: bool
+) -> None:
+    import csv as csv_module
+
+    out = io.StringIO(newline="")
+    csv_module.writer(out, lineterminator="\r\n" if crlf else "\n").writerows(rows)
+    text_ = out.getvalue()
+    guard = _guard(chars=10**6, columns=50)
+    _feed_all(text_, guard)  # no limit is hit by an honest file
+    parsed = list(csv_module.reader(io.StringIO(text_, newline="")))
+    assert parsed == rows  # the writer's quoting round-trips, multi-line cells included
+
+
+def test_r1_025_csv_safe_skips_any_leading_whitespace_including_unicode_spaces() -> None:
+    for space in ("\u3000", "\u2000", "\u2003", "\u200a", "\u00a0", " "):
+        assert rules.csv_safe(f"{space}=1+1").startswith("'"), repr(space)
+        assert rules.csv_safe(f"{space}'{space}@x").startswith("'")
+    assert rules.csv_safe("\u3000plain") == "\u3000plain"

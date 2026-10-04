@@ -15,8 +15,9 @@ exception message or a failure reason.
 import csv
 import io
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -71,18 +72,32 @@ def limits_from_settings(settings: Settings | None = None) -> rules.ImportLimits
         max_row_chars=cfg.import_max_row_chars,
         chunk_max_chars=cfg.import_chunk_max_bytes,
         max_attempts=cfg.import_max_attempts,
+        lease_seconds=cfg.import_lease_seconds,
     )
 
 
-def _bounded_lines(text_io: io.TextIOBase, max_chars: int) -> Iterator[str]:
-    """Lines for the csv reader, refusing a line longer than `max_chars` before it is held in
-    memory, and any NUL character. csv.Error is what the reader loop already treats as an
-    unreadable file; its message is never used."""
-    while line := text_io.readline(max_chars + 1):
-        if len(line) > max_chars and not line.endswith(("\n", "\r")):
+@contextmanager
+def _field_limit(size: int) -> Iterator[None]:
+    """Set the csv module's (process-wide) cell cap for the job and restore it afterwards."""
+    previous = csv.field_size_limit(size)
+    try:
+        yield
+    finally:
+        csv.field_size_limit(previous)
+
+
+def _bounded_lines(text_io: io.TextIOBase, limits: rules.ImportLimits) -> Iterator[str]:
+    """Lines for the csv reader with every limit enforced BEFORE the csv module can buffer
+    more: no physical line over the row cap, no NUL, and no record (which may span many lines
+    through quoted newlines) over the row or column caps. A broken limit raises, and the
+    messages are never used (csv.Error means unreadable; RecordLimitError carries a code)."""
+    guard = rules.RecordGuard(max_record_chars=limits.max_row_chars, max_columns=limits.max_columns)
+    while line := text_io.readline(limits.max_row_chars + 1):
+        if len(line) > limits.max_row_chars and not line.endswith(("\n", "\r")):
             raise csv.Error("line too long")
         if "\x00" in line:
             raise csv.Error("NUL")
+        guard.feed(line)
         yield line
 
 
@@ -96,6 +111,7 @@ class _Start:
     layout_date: date
     scan_state: str
     attempts: int
+    lease_expires_at: datetime | None
 
 
 def process_batch(
@@ -128,6 +144,7 @@ def process_batch(
             limits or limits_from_settings(),
         )
     except Exception as exc:
+        _release_lease(engine, clock, tenant_id, batch_id)  # so a retry can take over at once
         permanent = isinstance(exc, TenantMismatchError)
         if final_attempt or permanent:
             code = "storage_unavailable" if isinstance(exc, StorageError) else "processing_error"
@@ -181,6 +198,23 @@ def _advance(
     )
 
 
+def _release_lease(engine: Engine, clock: Clock, tenant_id: UUID, batch_id: UUID) -> None:
+    try:
+        with tenant_session(engine, tenant_id=tenant_id) as s:
+            _lock(s, tenant_id, batch_id)
+            current = _batch(s, tenant_id, batch_id)
+            if current.status not in rules.TERMINAL_STATES:
+                update_versioned(
+                    s,
+                    "import_batches",
+                    row_id=batch_id,
+                    expected_version=current.row_version,
+                    values={"lease_expires_at": clock.now()},
+                )
+    except Exception as exc:  # best effort: the lease then simply expires on its own
+        log.error("import_release_lease_error", batch_id=str(batch_id), error=type(exc).__name__)
+
+
 def _mark_failed(engine: Engine, clock: Clock, tenant_id: UUID, batch_id: UUID, code: str) -> None:
     try:
         with tenant_session(engine, tenant_id=tenant_id) as s:
@@ -217,6 +251,7 @@ def _load_start(session: Session, tenant_id: UUID, batch_id: UUID) -> _Start:
         layout_date,
         version.scan_state,
         int(row.attempts),
+        row.lease_expires_at,
     )
 
 
@@ -235,14 +270,27 @@ def _run(
         start = _load_start(s, tenant_id, batch_id)
         if start.status in rules.TERMINAL_STATES:
             return str(start.status)
-        # Crash-loop guard: a worker that keeps dying mid-file must not be redelivered forever.
+        now = clock.now()
+        if (
+            start.status in rules.PROGRESS_STATES[2:]
+            and start.lease_expires_at is not None
+            and start.lease_expires_at > now
+        ):
+            # Another worker holds a fresh lease: a duplicate delivery does nothing and is
+            # not counted as an attempt.
+            return str(start.status)
+        # A first start or a takeover of an expired lease is an attempt. A worker that keeps
+        # dying mid-file must not be taken over forever (crash-loop guard).
         current = _batch(s, tenant_id, batch_id)
         update_versioned(
             s,
             "import_batches",
             row_id=batch_id,
             expected_version=current.row_version,
-            values={"attempts": start.attempts + 1},
+            values={
+                "attempts": start.attempts + 1,
+                "lease_expires_at": now + timedelta(seconds=limits.lease_seconds),
+            },
         )
         if start.attempts + 1 > limits.max_attempts:
             _advance(s, clock, tenant_id, batch_id, "failed", failure_reason="worker_crash_loop")
@@ -253,10 +301,9 @@ def _run(
     if start.scan_state == "infected":  # 'pending' proceeds until Phase 7 gates on 'clean'
         return _reject(engine, clock, tenant_id, batch_id, [rules.Issue("FILE_INFECTED", "")], None)
 
-    csv.field_size_limit(limits.max_cell_chars)
-    with store.open(start.storage_key) as binary:
+    with _field_limit(limits.max_cell_chars), store.open(start.storage_key) as binary:
         text_io = io.TextIOWrapper(binary, encoding="utf-8-sig", newline="")
-        reader = csv.reader(_bounded_lines(text_io, limits.max_row_chars))
+        reader = csv.reader(_bounded_lines(text_io, limits))
         header, problem = _read_header(reader, limits)
         if header is None:
             return _reject(
@@ -316,6 +363,8 @@ def _next_row(
             cells = next(reader)
         except StopIteration:
             return None, None
+        except rules.RecordLimitError as exc:
+            return None, exc.code
         except (csv.Error, UnicodeDecodeError):
             return None, "FILE_UNREADABLE"
         if rules.row_chars(cells) > limits.max_row_chars:
@@ -376,6 +425,9 @@ def _reject(
     """Reject the whole file: file-level exceptions (row 0) and the `rejected` status, together."""
     with tenant_session(engine, tenant_id=tenant_id) as s:
         _lock(s, tenant_id, batch_id)
+        current = _batch(s, tenant_id, batch_id)
+        if current.status in rules.TERMINAL_STATES:
+            return str(current.status)  # lost a race: the batch already has its final state
         _insert_exceptions(
             s,
             tenant_id=tenant_id,
@@ -486,7 +538,9 @@ def _stream_rows(
     stop: str | None = None
 
     def flush() -> None:
-        written = _chunk(engine, clock, tenant_id, batch_id, headers, match, buffer)
+        written = _chunk(
+            engine, clock, tenant_id, batch_id, headers, match, buffer, limits.lease_seconds
+        )
         buffer.clear()
         if after_chunk is not None:
             after_chunk(written)
@@ -539,6 +593,7 @@ def _chunk(
     headers: tuple[str, ...],
     match: rules.LayoutMatch,
     buffer: list[tuple[int, list[str]]],
+    lease_seconds: int = 300,
 ) -> int:
     """One transaction: raw rows, exceptions, counters, one audit event. Returns rows written."""
     now = clock.now()
@@ -587,7 +642,7 @@ def _chunk(
             "import_batches",
             row_id=batch_id,
             expected_version=current.row_version,
-            values=counters,
+            values={**counters, "lease_expires_at": now + timedelta(seconds=lease_seconds)},
         )
         by_code: dict[str, int] = {}
         for _, _, issue in items:

@@ -85,8 +85,13 @@ def safe_enqueue(enqueue: Enqueuer, tenant_id: UUID, batch_id: UUID) -> bool:
 
 
 def sweep_stale(engine: Engine, clock: Clock, enqueue: Enqueuer, *, minutes: int) -> int:
-    """Re-queue batches still `received`/`queued` after `minutes` (a lost job). Safe to repeat:
-    the job does nothing for a batch that is already being or has been processed."""
+    """Re-queue batches whose job was lost: `received`/`queued` for `minutes`, or working with
+    an expired lease. Safe to repeat: the job does nothing for a finished batch or one with a
+    fresh lease, and takes over only an expired one (counting an attempt).
+
+    A system job. It reads only the ids of active tenants (`cbam.tenants`, platform mode, no
+    business tables) and then queries batches per tenant under row-level security. Suspended
+    or closed tenants are not swept."""
     cutoff = clock.now() - timedelta(minutes=minutes)
     with tenant_session(engine, tenant_id=None, platform=True) as s:
         tenants = list(
@@ -95,7 +100,7 @@ def sweep_stale(engine: Engine, clock: Clock, enqueue: Enqueuer, *, minutes: int
     sent = 0
     for tenant_id in tenants:
         with tenant_session(engine, tenant_id=tenant_id) as s:
-            batch_ids = service.stale_batch_ids(s, tenant_id, older_than=cutoff)
+            batch_ids = service.stale_batch_ids(s, tenant_id, older_than=cutoff, now=clock.now())
         sent += sum(safe_enqueue(enqueue, tenant_id, b) for b in batch_ids)
     return sent
 
