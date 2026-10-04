@@ -7,6 +7,7 @@ row-level security applies exactly as in production.
 
 import os
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from uuid import UUID
 
@@ -16,6 +17,7 @@ from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.engine import make_url
+from sqlalchemy.orm import Session
 
 from app.core.db import make_engine, tenant_session
 from app.core.ids import uuid7
@@ -116,3 +118,13 @@ def client(app_engine: Engine) -> Iterator[TestClient]:
     app.dependency_overrides[get_engine_dep] = lambda: app_engine
     with TestClient(app) as c:
         yield c
+
+
+@contextmanager
+def owner_session(engine: Engine) -> Iterator[Session]:
+    """Platform mode acting as the table owner: for test setup that production code does
+    through the bootstrap commands. Works for a Supabase-style non-superuser, where a plain
+    admin connection is stopped by forced row-level security."""
+    with tenant_session(engine, tenant_id=None, platform=True) as s:
+        s.execute(text("set local role cbam_owner"))
+        yield s

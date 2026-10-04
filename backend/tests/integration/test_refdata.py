@@ -43,10 +43,16 @@ ALL_TABLES = [
 @pytest.fixture(autouse=True)
 def clean(admin_engine: Engine) -> Iterator[None]:
     """The test database persists between runs; reference data is global, so reset it."""
+    # As the table owner: works for a Supabase-style `postgres` user too, which cannot set
+    # session_replication_role. The owner may switch off its own tables' triggers and RLS.
     with admin_engine.begin() as conn:
-        conn.execute(text("set local session_replication_role = replica"))
+        conn.execute(text("set local role cbam_owner"))
         for table in ALL_TABLES:
+            conn.execute(text(f"alter table cbam.{table} disable trigger user"))
+            conn.execute(text(f"alter table cbam.{table} no force row level security"))
             conn.execute(text(f"delete from cbam.{table}"))  # noqa: S608
+            conn.execute(text(f"alter table cbam.{table} force row level security"))
+            conn.execute(text(f"alter table cbam.{table} enable trigger user"))
     service.clear_impact_providers()
     yield
     service.clear_impact_providers()
@@ -58,10 +64,11 @@ def session(engine: Engine, user: UUID | None = None):  # type: ignore[no-untype
 
 def make_owner(app_engine: Engine, admin_engine: Engine) -> UUID:
     uid = make_user(app_engine)
-    with admin_engine.begin() as conn:
-        conn.execute(
-            text("insert into cbam.platform_domain_owners (user_id) values (:u)"), {"u": uid}
-        )
+    # Same path as the bootstrap command: platform mode, acting as the table owner. This works
+    # for a Supabase-style non-superuser too, which RLS would otherwise stop.
+    with tenant_session(admin_engine, tenant_id=None, platform=True) as s:
+        s.execute(text("set local role cbam_owner"))
+        s.execute(text("insert into cbam.platform_domain_owners (user_id) values (:u)"), {"u": uid})
     return uid
 
 
