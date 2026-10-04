@@ -6,7 +6,7 @@ from celery.schedules import crontab
 
 from app.core.config import get_settings
 
-celery_app = Celery("cbam", broker=get_settings().redis_url)
+celery_app = Celery("cbam", broker=get_settings().redis_url, include=["app.modules.imports.jobs"])
 celery_app.conf.beat_schedule = {
     "heartbeat": {"task": "app.core.jobs.heartbeat", "schedule": 300.0},
     "escalate-overdue-tasks": {

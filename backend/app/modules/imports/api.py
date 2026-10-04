@@ -1,9 +1,12 @@
+import csv
+import io
 import re
-from collections.abc import AsyncGenerator, AsyncIterator
-from typing import Annotated, Any
+from collections.abc import AsyncGenerator, AsyncIterator, Iterator
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
+from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
@@ -14,13 +17,15 @@ from app.core.config import Settings, get_settings
 from app.core.errors import InvalidRequestError, PayloadTooLargeError, UnsupportedMediaError
 from app.core.storage import ObjectStore, get_object_store
 from app.core.tenancy import TenantContext, require
-from app.core.versioning import etag
+from app.core.versioning import etag, parse_if_match
 from app.modules.imports import service
+from app.modules.imports.jobs import Enqueuer, get_enqueuer, safe_enqueue
 from app.modules.imports.schemas import (
     ImportBatchCreated,
     ImportBatchMetadata,
     ImportBatchOut,
     ImportBatchPage,
+    RowExceptionPage,
 )
 
 router = APIRouter(prefix="/tenants/{tenant_id}/import-batches", tags=["imports"])
@@ -82,16 +87,21 @@ async def create_import_batch(
     clock: Annotated[Clock, Depends(get_clock)],
     settings: Annotated[Settings, Depends(get_settings)],
     store: Annotated[ObjectStore, Depends(get_object_store)],
+    enqueue: Annotated[Enqueuer, Depends(get_enqueuer)],
     idempotency_key: Annotated[str | None, Header()] = None,
 ) -> ImportBatchCreated:
     """Upload a customs file. 202 for a new batch, 200 with `replayed: true` for a file that
-    was already received (same SHA-256 and same declared details)."""
+    was already received (same SHA-256 and same declared details). A new batch is queued for
+    processing after it is saved; a replay is not queued again."""
     max_bytes = settings.import_max_file_bytes
     service.upload_limiter.acquire(ctx.tenant_id, settings.import_max_concurrent_uploads_per_tenant)
     try:
-        return await _receive(request, response, ctx, clock, store, idempotency_key, max_bytes)
+        result = await _receive(request, response, ctx, clock, store, idempotency_key, max_bytes)
     finally:
         service.upload_limiter.release(ctx.tenant_id)
+    if not result.replayed:
+        await run_in_threadpool(safe_enqueue, enqueue, ctx.tenant_id, result.id)
+    return result
 
 
 async def _receive(
@@ -182,3 +192,80 @@ def get_import_batch(
         batch = service.get_batch(s, ctx.tenant_id, batch_id)
     response.headers["ETag"] = etag(batch.row_version)
     return batch
+
+
+@router.get("/{batch_id}/exceptions", response_model=RowExceptionPage)
+def list_exceptions(
+    batch_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require("imports:read"))],
+    severity: Literal["error", "warning"] | None = None,
+    status: Literal["open", "resolved", "waived"] | None = None,
+    export: Annotated[Literal["json", "csv"], Query(alias="format")] = "json",
+    limit: Annotated[int | None, Query(ge=1, le=200)] = None,
+    cursor: str | None = None,
+) -> Any:
+    """The exception report. JSON is cursor-paginated; `format=csv` streams every matching row
+    with a header row and spreadsheet-formula escaping."""
+    if export == "json":
+        with ctx.session() as s:
+            return service.list_exceptions(
+                s,
+                ctx.tenant_id,
+                batch_id,
+                severity=severity,
+                status=status,
+                limit=limit,
+                cursor=cursor,
+            )
+    with ctx.session() as s:
+        service.get_batch(s, ctx.tenant_id, batch_id)  # 404 before any byte is sent
+
+    def lines() -> Iterator[str]:
+        rows = service.exceptions_csv_rows(
+            service.iter_exception_pages(
+                ctx.session, ctx.tenant_id, batch_id, severity=severity, status=status
+            )
+        )
+        for row in rows:
+            buffer = io.StringIO()
+            csv.writer(buffer).writerow(row)
+            yield buffer.getvalue()
+
+    return StreamingResponse(
+        lines(),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "content-disposition": f'attachment; filename="exceptions-{batch_id}.csv"',
+            "cache-control": "no-store",
+            "x-content-type-options": "nosniff",
+        },
+    )
+
+
+@router.post("/{batch_id}/retry", response_model=ImportBatchCreated, status_code=202)
+def retry_import_batch(
+    batch_id: UUID,
+    request: Request,
+    response: Response,
+    ctx: Annotated[TenantContext, Depends(require("imports:write"))],
+    clock: Annotated[Clock, Depends(get_clock)],
+    enqueue: Annotated[Enqueuer, Depends(get_enqueuer)],
+    if_match: Annotated[str | None, Header()] = None,
+) -> ImportBatchCreated:
+    """Retry a failed batch (409 for any other status). A failed batch is final, so this makes
+    a new batch for the same stored file and queues it; the old one stays as history."""
+    expected = parse_if_match(if_match)
+    with ctx.session() as s:
+        created = service.retry_batch(
+            s,
+            tenant_id=ctx.tenant_id,
+            batch_id=batch_id,
+            expected_version=expected,
+            actor=service.Actor("user", ctx.user.user_id),
+            now=clock.now(),
+        )
+    safe_enqueue(enqueue, ctx.tenant_id, created.id)
+    base = request.url.path.rsplit("/", 2)[0]
+    response.headers["ETag"] = etag(created.row_version)
+    response.headers["Location"] = f"{base}/{created.id}"
+    return created
