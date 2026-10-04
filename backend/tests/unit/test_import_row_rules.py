@@ -67,6 +67,7 @@ def test_r1_025_a_good_row_has_no_issues() -> None:
         ("SYNTH_ORIGIN", "DEU", "ORIGIN_INVALID"),
         ("SYNTH_VALUE", "", "VALUE_MISSING"),
         ("SYNTH_VALUE", "12.3.4", "VALUE_INVALID"),
+        ("SYNTH_VALUE", "1.123456789", "VALUE_PRECISION"),
         ("SYNTH_VALUE", "-5", "VALUE_INVALID"),
         ("SYNTH_CCY", "", "CURRENCY_MISSING"),
         ("SYNTH_CCY", "EU", "CURRENCY_INVALID"),
@@ -104,7 +105,7 @@ def test_r1_025_supplier_is_a_warning_only_and_the_row_stays_valid() -> None:
         rules.map_row({**GOOD, "SYNTH_SUPPLIER": ""}, rules.match_layout(list(GOOD), LAYOUT))
     )
     assert [(i.code, rules.issue_severity(i.code)) for i in issues] == [
-        ("SUPPLIER_UNMAPPED", "warning")
+        ("SUPPLIER_MISSING", "warning")
     ]
     assert rules.row_is_valid(issues)
     assert not rules.row_is_valid([rules.Issue("NET_MASS_INVALID", "line.net_mass_kg")])
@@ -156,6 +157,17 @@ def test_r1_025_messages_are_fixed_text_and_codes_are_short() -> None:
         ("@SUM(A1)", "'@SUM(A1)"),
         ("\tx", "'\tx"),
         ("\rx", "'\rx"),
+        ("\nx", "'\nx"),
+        (" =1+1", "' =1+1"),
+        ("'=1+1", "''=1+1"),
+        ('"=1+1', "'\"=1+1"),
+        ("\u00a0@x", "'\u00a0@x"),
+        ("\uff1d1+1", "'\uff1d1+1"),
+        ("\uff0bx", "'\uff0bx"),
+        ("\uff0dx", "'\uff0dx"),
+        ("\uff20x", "'\uff20x"),
+        (";cmd", "';cmd"),
+        ("|cmd", "'|cmd"),
         ("plain", "plain"),
         ("", ""),
     ],
@@ -182,3 +194,84 @@ def test_r1_025_decimal_parsing_is_exact_and_never_goes_through_a_float(
     assert not too_precise
     assert value == Decimal(text)  # exact: a float round trip would not hold at these sizes
     assert isinstance(value, Decimal)
+
+
+def test_r1_025_every_required_mapped_field_is_enforced_not_just_the_checked_ones() -> None:
+    layout = (
+        LayoutColumn("E", "declaration.eori", True),
+        LayoutColumn("B", "line.valuation_basis", True),
+        LayoutColumn("C", "line.cpc", True),
+        LayoutColumn("D", "line.description", True),
+        LayoutColumn("S", "line.supplier_ref", True),
+        LayoutColumn("O", "line.description", False),
+    )
+    raw = {"E": "", "B": " ", "C": "", "D": "", "S": ""}
+    match = rules.match_layout(list(raw), layout[:5])
+    issues = rules.validate_row(rules.map_row(raw, match))
+    assert {i.code for i in issues} == {
+        "EORI_MISSING",
+        "VALUATION_BASIS_MISSING",
+        "CPC_MISSING",
+        "DESCRIPTION_MISSING",
+        "SUPPLIER_MISSING",
+    }
+    # a required supplier is still only a warning, and an empty optional field is fine
+    assert [i.code for i in issues if rules.issue_severity(i.code) == "warning"] == [
+        "SUPPLIER_MISSING"
+    ]
+    assert (
+        rules.validate_row(
+            rules.map_row(
+                {"E": ""},
+                rules.match_layout(["E"], (LayoutColumn("E", "declaration.eori", False),)),
+            )
+        )
+        == ()
+    )
+
+
+def test_r1_025_a_layout_with_a_date_but_no_format_or_a_doubled_field_is_invalid() -> None:
+    assert rules.layout_is_invalid((LayoutColumn("D", "declaration.acceptance_date", True),))
+    assert not rules.layout_is_invalid(
+        (LayoutColumn("D", "declaration.acceptance_date", True, "%Y-%m-%d"),)
+    )
+    assert rules.layout_is_invalid(
+        (LayoutColumn("A", "line.cpc", False), LayoutColumn("B", "line.cpc", False))
+    )
+    # unmapped or unknown targets are ignored, so they cannot clash
+    assert not rules.layout_is_invalid(
+        (
+            LayoutColumn("A", None, False),
+            LayoutColumn("B", None, False),
+            LayoutColumn("C", "x", False),
+        )
+    )
+
+
+def test_r1_025_no_guessed_date_format_a_date_without_one_is_never_accepted() -> None:
+    row = rules.MappedRow(
+        {"declaration.acceptance_date": "2027-01-05"},
+        frozenset(),
+        {},
+        frozenset({"declaration.acceptance_date"}),
+    )
+    assert [i.code for i in rules.validate_row(row)] == ["ACCEPTANCE_DATE_INVALID"]
+
+
+LIMITS = rules.ImportLimits(
+    max_columns=3,
+    max_heading_chars=5,
+    max_cell_chars=10,
+    max_row_chars=50,
+    chunk_max_chars=100,
+    max_attempts=8,
+)
+
+
+def test_r1_025_header_limits_give_file_level_codes() -> None:
+    assert rules.header_problem(["a", "b", "c"], LIMITS) is None
+    assert rules.header_problem(["a", "b", "c", "d"], LIMITS) == "HEADER_TOO_MANY_COLUMNS"
+    assert rules.header_problem(["a", "123456"], LIMITS) == "HEADER_TOO_LONG"
+    for code in ("HEADER_TOO_MANY_COLUMNS", "HEADER_TOO_LONG", "ROW_TOO_LARGE", "FILE_INFECTED"):
+        assert code in rules.FILE_LEVEL_CODES and code in rules.ISSUES
+    assert rules.row_chars(["ab", "c"]) == 5

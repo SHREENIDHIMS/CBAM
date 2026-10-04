@@ -16,7 +16,7 @@ import csv
 import io
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
@@ -27,6 +27,8 @@ from sqlalchemy.orm import Session
 
 from app.core.audit import record
 from app.core.clock import Clock
+from app.core.config import Settings, get_settings
+from app.core.dates import uk_date
 from app.core.db import tenant_session
 from app.core.errors import StorageError, TenantMismatchError
 from app.core.ids import uuid7
@@ -52,7 +54,36 @@ log = structlog.get_logger()
 class ImportJobError(RuntimeError):
     """Any failure of the job, reduced to the class name of the cause. The original message
     can carry SQL parameters (cell values), so it is dropped before it can reach a log, a
-    Celery result or Sentry."""
+    Celery result or Sentry. `permanent` means retrying cannot help (the batch is marked
+    failed straight away and the task does not back off and retry)."""
+
+    def __init__(self, cause: str, *, permanent: bool = False) -> None:
+        super().__init__(cause)
+        self.permanent = permanent
+
+
+def limits_from_settings(settings: Settings | None = None) -> rules.ImportLimits:
+    cfg = settings or get_settings()
+    return rules.ImportLimits(
+        max_columns=cfg.import_max_columns,
+        max_heading_chars=cfg.import_max_heading_chars,
+        max_cell_chars=cfg.import_max_cell_chars,
+        max_row_chars=cfg.import_max_row_chars,
+        chunk_max_chars=cfg.import_chunk_max_bytes,
+        max_attempts=cfg.import_max_attempts,
+    )
+
+
+def _bounded_lines(text_io: io.TextIOBase, max_chars: int) -> Iterator[str]:
+    """Lines for the csv reader, refusing a line longer than `max_chars` before it is held in
+    memory, and any NUL character. csv.Error is what the reader loop already treats as an
+    unreadable file; its message is never used."""
+    while line := text_io.readline(max_chars + 1):
+        if len(line) > max_chars and not line.endswith(("\n", "\r")):
+            raise csv.Error("line too long")
+        if "\x00" in line:
+            raise csv.Error("NUL")
+        yield line
 
 
 @dataclass(frozen=True)
@@ -62,6 +93,9 @@ class _Start:
     report_type: str | None
     layout_version_id: UUID | None
     resume_from: int
+    layout_date: date
+    scan_state: str
+    attempts: int
 
 
 def process_batch(
@@ -74,6 +108,7 @@ def process_batch(
     chunk_rows: int = CHUNK_ROWS,
     final_attempt: bool = False,
     after_chunk: Callable[[int], None] | None = None,
+    limits: rules.ImportLimits | None = None,
 ) -> str:
     """Process (or resume) a batch; returns its status. A finished batch is a no-op.
 
@@ -82,12 +117,22 @@ def process_batch(
     `after_chunk(rows_in_chunk)` runs after each committed chunk (tests use it to crash).
     """
     try:
-        return _run(engine, store, clock, tenant_id, batch_id, chunk_rows, after_chunk)
+        return _run(
+            engine,
+            store,
+            clock,
+            tenant_id,
+            batch_id,
+            chunk_rows,
+            after_chunk,
+            limits or limits_from_settings(),
+        )
     except Exception as exc:
-        if final_attempt:
+        permanent = isinstance(exc, TenantMismatchError)
+        if final_attempt or permanent:
             code = "storage_unavailable" if isinstance(exc, StorageError) else "processing_error"
             _mark_failed(engine, clock, tenant_id, batch_id, code)
-        raise ImportJobError(type(exc).__name__) from None
+        raise ImportJobError(type(exc).__name__, permanent=permanent) from None
 
 
 def _lock(session: Session, tenant_id: UUID, batch_id: UUID) -> None:
@@ -147,20 +192,32 @@ def _mark_failed(engine: Engine, clock: Clock, tenant_id: UUID, batch_id: UUID, 
 
 def _load_start(session: Session, tenant_id: UUID, batch_id: UUID) -> _Start:
     row = _batch(session, tenant_id, batch_id)
-    key = session.execute(
-        select(document_versions.c.storage_key).where(
+    version = session.execute(
+        select(document_versions.c.storage_key, document_versions.c.scan_state).where(
             document_versions.c.tenant_id == tenant_id,
             document_versions.c.id == row.document_version_id,
         )
-    ).scalar_one_or_none()
-    if key is None:
+    ).one_or_none()
+    if version is None:
         raise TenantMismatchError()
     resume = session.execute(
         select(func.coalesce(func.max(source_rows.c.row_number), 0)).where(
             source_rows.c.tenant_id == tenant_id, source_rows.c.batch_id == batch_id
         )
     ).scalar_one()
-    return _Start(row.status, key, row.cds_report_type, row.report_layout_version_id, int(resume))
+    # The layout is chosen for the date the report was acquired (falling back to the date the
+    # batch was received), not the day the job happens to run.
+    layout_date = row.acquired_on or uk_date(row.created_at)
+    return _Start(
+        row.status,
+        version.storage_key,
+        row.cds_report_type,
+        row.report_layout_version_id,
+        int(resume),
+        layout_date,
+        version.scan_state,
+        int(row.attempts),
+    )
 
 
 def _run(
@@ -171,28 +228,56 @@ def _run(
     batch_id: UUID,
     chunk_rows: int,
     after_chunk: Callable[[int], None] | None,
+    limits: rules.ImportLimits,
 ) -> str:
     with tenant_session(engine, tenant_id=tenant_id) as s:
         _lock(s, tenant_id, batch_id)
         start = _load_start(s, tenant_id, batch_id)
         if start.status in rules.TERMINAL_STATES:
             return str(start.status)
+        # Crash-loop guard: a worker that keeps dying mid-file must not be redelivered forever.
+        current = _batch(s, tenant_id, batch_id)
+        update_versioned(
+            s,
+            "import_batches",
+            row_id=batch_id,
+            expected_version=current.row_version,
+            values={"attempts": start.attempts + 1},
+        )
+        if start.attempts + 1 > limits.max_attempts:
+            _advance(s, clock, tenant_id, batch_id, "failed", failure_reason="worker_crash_loop")
+            log.error("import_crash_loop", batch_id=str(batch_id), attempts=start.attempts + 1)
+            return "failed"
         _advance(s, clock, tenant_id, batch_id, "queued")
         _advance(s, clock, tenant_id, batch_id, "parsing")
+    if start.scan_state == "infected":  # 'pending' proceeds until Phase 7 gates on 'clean'
+        return _reject(engine, clock, tenant_id, batch_id, [rules.Issue("FILE_INFECTED", "")], None)
 
+    csv.field_size_limit(limits.max_cell_chars)
     with store.open(start.storage_key) as binary:
         text_io = io.TextIOWrapper(binary, encoding="utf-8-sig", newline="")
-        reader = csv.reader(text_io)
-        header, unreadable = _read_header(reader)
+        reader = csv.reader(_bounded_lines(text_io, limits.max_row_chars))
+        header, problem = _read_header(reader, limits)
         if header is None:
-            code = "FILE_UNREADABLE" if unreadable else "HEADER_MISSING"
-            return _reject(engine, clock, tenant_id, batch_id, [rules.Issue(code, "")], None)
+            return _reject(
+                engine,
+                clock,
+                tenant_id,
+                batch_id,
+                [rules.Issue(problem or "HEADER_MISSING", "")],
+                None,
+            )
+        too_big = rules.header_problem(header, limits)
+        if too_big:
+            return _reject(
+                engine, clock, tenant_id, batch_id, [rules.Issue(too_big, "")], "unreadable"
+            )
         headers = rules.raw_headers(header)
         match_or_status = _prepare(engine, clock, tenant_id, batch_id, start, headers)
         if isinstance(match_or_status, str):
             return match_or_status
         match = match_or_status
-        unreadable = _stream_rows(
+        stopped = _stream_rows(
             engine,
             clock,
             tenant_id,
@@ -203,13 +288,14 @@ def _run(
             start.resume_from,
             chunk_rows,
             after_chunk,
+            limits,
         )
         text_io.detach()
 
-    if unreadable:
-        return _reject(
-            engine, clock, tenant_id, batch_id, [rules.Issue("FILE_UNREADABLE", "")], None
-        )
+    if stopped:
+        # Rows saved before the problem stay (raw rows are never deleted) with their counters;
+        # the batch is rejected and a corrected file makes a new batch.
+        return _reject(engine, clock, tenant_id, batch_id, [rules.Issue(stopped, "")], None)
     with tenant_session(engine, tenant_id=tenant_id) as s:
         _lock(s, tenant_id, batch_id)
         counters = _recount(s, tenant_id, batch_id)
@@ -220,24 +306,31 @@ def _run(
     return status
 
 
-def _next_row(reader: Iterator[list[str]]) -> tuple[list[str] | None, bool]:
-    """(cells, unreadable). Blank lines are skipped; (None, False) is the end of the file."""
+def _next_row(
+    reader: Iterator[list[str]], limits: rules.ImportLimits
+) -> tuple[list[str] | None, str | None]:
+    """(cells, stop_code). Blank lines are skipped; (None, None) is the end of the file; a stop
+    code (`FILE_UNREADABLE` or `ROW_TOO_LARGE`) means the file cannot be read any further."""
     while True:
         try:
             cells = next(reader)
         except StopIteration:
-            return None, False
+            return None, None
         except (csv.Error, UnicodeDecodeError):
-            return None, True
+            return None, "FILE_UNREADABLE"
+        if rules.row_chars(cells) > limits.max_row_chars:
+            return None, "ROW_TOO_LARGE"
         if cells:
-            return cells, False
+            return cells, None
 
 
-def _read_header(reader: Iterator[list[str]]) -> tuple[list[str] | None, bool]:
-    cells, unreadable = _next_row(reader)
+def _read_header(
+    reader: Iterator[list[str]], limits: rules.ImportLimits
+) -> tuple[list[str] | None, str | None]:
+    cells, problem = _next_row(reader, limits)
     if cells is None or not any(c.strip() for c in cells):
-        return None, unreadable
-    return cells, False
+        return None, problem
+    return cells, None
 
 
 def _insert_exceptions(
@@ -319,7 +412,7 @@ def _prepare(
     A new batch uses the layout version active today. A batch being resumed keeps the version
     it started with, so a layout activated mid-file cannot change how later rows are read.
     """
-    as_of = clock.today_uk()
+    as_of = start.layout_date
     with tenant_session(engine, tenant_id=tenant_id) as s:
         if start.layout_version_id is not None:
             rows = refdata.rows_of_version(s, LAYOUT_DATASET, start.layout_version_id)
@@ -345,6 +438,10 @@ def _prepare(
             batch_id,
             [rules.Issue("LAYOUT_NOT_ACTIVE", "")],
             "not_active",
+        )
+    if rules.layout_is_invalid(columns):
+        return _reject(
+            engine, clock, tenant_id, batch_id, [rules.Issue("LAYOUT_INVALID", "")], "invalid"
         )
     match = rules.match_layout(headers, columns)
     if match.duplicate_headers:
@@ -378,29 +475,37 @@ def _stream_rows(
     resume_from: int,
     chunk_rows: int,
     after_chunk: Callable[[int], None] | None,
-) -> bool:
-    """Feed the data rows to `_chunk`; returns True if the file stopped being readable."""
+    limits: rules.ImportLimits,
+) -> str | None:
+    """Feed the data rows to `_chunk`, 500 rows or `chunk_max_chars` at a time, whichever
+    comes first. Returns a file-level stop code if the file stopped being readable.
+    Row numbers count CSV records, not file lines (a quoted newline is one record)."""
     number = 0
     buffer: list[tuple[int, list[str]]] = []
-    unreadable = False
+    buffered_chars = 0
+    stop: str | None = None
+
+    def flush() -> None:
+        written = _chunk(engine, clock, tenant_id, batch_id, headers, match, buffer)
+        buffer.clear()
+        if after_chunk is not None:
+            after_chunk(written)
+
     while True:
-        cells, unreadable = _next_row(reader)
+        cells, stop = _next_row(reader, limits)
         if cells is None:
             break
         number += 1
         if number <= resume_from:
             continue
         buffer.append((number, cells))
-        if len(buffer) >= chunk_rows:
-            written = _chunk(engine, clock, tenant_id, batch_id, headers, match, buffer)
-            buffer = []
-            if after_chunk is not None:
-                after_chunk(written)
+        buffered_chars += rules.row_chars(cells)
+        if len(buffer) >= chunk_rows or buffered_chars >= limits.chunk_max_chars:
+            flush()
+            buffered_chars = 0
     if buffer:
-        written = _chunk(engine, clock, tenant_id, batch_id, headers, match, buffer)
-        if after_chunk is not None:
-            after_chunk(written)
-    return unreadable
+        flush()
+    return stop
 
 
 def _recount(session: Session, tenant_id: UUID, batch_id: UUID) -> dict[str, int]:

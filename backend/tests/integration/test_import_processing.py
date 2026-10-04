@@ -13,7 +13,7 @@ import io
 import json
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from uuid import UUID
 
 import pytest
@@ -29,6 +29,7 @@ from app.core.clock import FrozenClock, get_clock
 from app.core.config import Settings, get_settings
 from app.core.db import tenant_session
 from app.core.errors import StorageError, TenantMismatchError
+from app.core.ids import uuid7
 from app.core.storage import InMemoryStore, get_object_store
 from app.core.tenancy import get_engine_dep, get_verifier
 from app.main import create_app
@@ -50,6 +51,7 @@ from tests.refdata_helpers import FIXTURES, write_dataset
 
 NOW = datetime(2027, 3, 1, 9, 0, tzinfo=UTC)
 CLOCK = FrozenClock(NOW)
+TODAY = NOW.date()
 META = ImportBatchMetadata(
     acquisition_method="get_customs_data", cds_report_type="import_item", eori="GB123456789012"
 )
@@ -141,7 +143,7 @@ DEFECTS: list[tuple[Callable[[list[str]], list[str]], set[tuple[str, str]]]] = [
     (lambda r: [*r, "one cell too many"], {("", "ROW_TOO_LONG")}),
     (
         lambda r: r[:9],  # the supplier cell is gone as well: a warning, not an error
-        {("", "ROW_TOO_SHORT"), ("line.supplier_ref", "SUPPLIER_UNMAPPED")},
+        {("", "ROW_TOO_SHORT"), ("line.supplier_ref", "SUPPLIER_MISSING")},
     ),
 ]
 BAD_EVERY = 13
@@ -158,7 +160,7 @@ def seeded_file(total: int = 500, bad: int = 37) -> tuple[bytes, dict[int, set[t
             row[11] = "a quoted\nnew line, with a comma"  # one row spanning two lines
         if number in WARNING_ONLY_ROWS:
             row[10] = ""
-            expected[number] = {("line.supplier_ref", "SUPPLIER_UNMAPPED")}
+            expected[number] = {("line.supplier_ref", "SUPPLIER_MISSING")}
         rows.append(row)
     step = (total - 5) // bad if bad else 1
     for k in range(bad):
@@ -175,15 +177,18 @@ def receive(
     tenant: UUID,
     data: bytes,
     meta: ImportBatchMetadata = META,
+    *,
+    as_of: date = TODAY,
+    max_bytes: int = 10_000_000,
 ):  # type: ignore[no-untyped-def]
-    scanned = service.scan_upload(io.BytesIO(data), max_bytes=10_000_000)
+    scanned = service.scan_upload(io.BytesIO(data), max_bytes=max_bytes)
     return service.receive_file(
         lambda: tenant_session(engine, tenant_id=tenant),
         store=store,
         tenant_id=tenant,
         actor=Actor("system", None),
         now=NOW,
-        as_of=NOW.date(),
+        as_of=as_of,
         file=io.BytesIO(data),
         scanned=scanned,
         filename="a.csv",
@@ -192,7 +197,8 @@ def receive(
 
 
 def run(engine: Engine, store: InMemoryStore, tenant: UUID, batch: UUID, **kw: object) -> str:
-    return process_batch(engine, store, CLOCK, tenant, batch, **kw)  # type: ignore[arg-type]
+    clock = kw.pop("clock", CLOCK)
+    return process_batch(engine, store, clock, tenant, batch, **kw)  # type: ignore[arg-type]
 
 
 def batch_row(engine: Engine, tenant: UUID, batch: UUID):  # type: ignore[no-untyped-def]
@@ -238,15 +244,16 @@ def test_imp_10_r1_025_500_rows_with_37_bad_rows_report_each_and_valid_rows_cont
     assert row.layout_status == "matched" and row.report_layout_version_id is not None
     assert row.failure_reason is None
     assert exceptions(app_engine, tenant, batch.id) == expected_set(expected)
-    errors = {n for n, items in expected.items() if any(c != "SUPPLIER_UNMAPPED" for _, c in items)}
+    errors = {n for n, items in expected.items() if any(c != "SUPPLIER_MISSING" for _, c in items)}
     assert len(errors) == 37
     # a warning-only row is valid, and every row is stored (valid rows continue)
     assert exceptions(app_engine, tenant, batch.id, severity="warning") == {
-        (n, f, c) for n, f, c in expected_set(expected) if c == "SUPPLIER_UNMAPPED"
+        (n, f, c) for n, f, c in expected_set(expected) if c == "SUPPLIER_MISSING"
     }
     assert scalar(app_engine, tenant, "select count(*) from cbam.source_rows") == 500
     with tenant_session(app_engine, tenant_id=tenant) as s:
-        # a tax point or a normalised line is not created by this step
+        # no tax point, decision or normalised line exists yet (Phase 3 step 4 and Phase 4)
+        assert s.execute(text("select count(*) from cbam.decisions")).scalar_one() == 0
         assert (
             s.execute(
                 text(
@@ -476,7 +483,7 @@ def test_imp_13_r1_003_a_crash_mid_file_resumes_without_duplicates(
     )
     assert exceptions(app_engine, tenant, batch.id) == expected_set(expected)
     assert row.rows_rejected == len(
-        {n for n, _, c in expected_set(expected) if c != "SUPPLIER_UNMAPPED"}
+        {n for n, _, c in expected_set(expected) if c != "SUPPLIER_MISSING"}
     )
     assert row.rows_valid == 250 - row.rows_rejected
     events = scalar(
@@ -707,7 +714,7 @@ def test_imp_16_r1_025_exceptions_json_is_paginated_filtered_and_in_row_order(
     warnings = client.get(
         url(tenant, batch.id, "/exceptions"), params={"severity": "warning"}, headers=headers
     ).json()["items"]
-    assert warnings and {w["code"] for w in warnings} == {"SUPPLIER_UNMAPPED"}
+    assert warnings and {w["code"] for w in warnings} == {"SUPPLIER_MISSING"}
     assert (
         client.get(
             url(tenant, batch.id, "/exceptions"), params={"status": "resolved"}, headers=headers
@@ -755,7 +762,7 @@ def test_imp_16_r1_025_exceptions_csv_has_a_header_row_streams_all_rows_and_has_
         params={"format": "csv", "severity": "error"},
         headers=headers,
     )
-    assert "SUPPLIER_UNMAPPED" not in errors_only.text
+    assert "SUPPLIER_MISSING" not in errors_only.text
 
 
 def test_imp_16_r1_025_csv_escapes_anything_that_starts_like_a_formula(
@@ -764,7 +771,7 @@ def test_imp_16_r1_025_csv_escapes_anything_that_starts_like_a_formula(
     """Defence in depth: even a field or message that did come from a file is neutralised."""
     tenant = make_tenant(app_engine, "A")
     headers = user_for(app_engine, tenant, "operations")
-    batch, _ = processed_batch(app_engine, store, tenant, total=3, bad=0)
+    batch = receive(app_engine, store, tenant, to_csv([good_row(1)]))  # still open for rows
     with tenant_session(admin_engine, tenant_id=tenant) as s:
         s.execute(text("set local role cbam_owner"))
         s.execute(
@@ -816,7 +823,7 @@ def test_imp_16_r1_025_exception_endpoints_need_imports_read_and_stay_in_the_ten
     )  # not a member
 
 
-def test_imp_16_r1_003_a_new_upload_is_queued_once_and_a_replay_is_not(
+def test_imp_16_r1_003_a_new_upload_is_queued_and_a_replay_only_if_its_job_never_started(
     client: TestClient, app_engine: Engine, queued: list[tuple[UUID, UUID]], layout: UUID
 ) -> None:
     tenant = make_tenant(app_engine, "A")
@@ -838,7 +845,8 @@ def test_imp_16_r1_003_a_new_upload_is_queued_once_and_a_replay_is_not(
         headers=headers,
     )
     assert again.status_code == 200 and again.json()["replayed"] is True
-    assert len(queued) == 1
+    # still `received`: the job may have been lost, so the replay queues it again (idempotent)
+    assert queued == [(tenant, UUID(first.json()["id"]))] * 2
 
 
 def test_imp_16_r1_003_a_broker_outage_does_not_fail_an_accepted_upload(
@@ -1029,7 +1037,7 @@ def test_imp_17_r1_025_exception_facts_are_immutable_only_the_resolution_can_mov
         )
         == 1
     )
-    with pytest.raises(DBAPIError, match="cannot change status"):
+    with pytest.raises(DBAPIError, match="cannot change again"):
         sql(app_engine, tenant, f"update cbam.row_exceptions set status = 'open' where id = {one}")  # noqa: S608
     with pytest.raises(DBAPIError):  # a status other than open needs a resolution time
         sql(
@@ -1046,7 +1054,7 @@ def test_imp_17_r1_025_codes_and_cross_tenant_links_are_constrained(
     app_engine: Engine, admin_engine: Engine, layout: UUID
 ) -> None:
     a, b = make_tenant(app_engine, "A"), make_tenant(app_engine, "B")
-    batch_a, _ = processed_batch(app_engine, InMemoryStore(), a, total=3, bad=0)
+    batch_a = receive(app_engine, InMemoryStore(), a, to_csv([good_row(1)]))  # not final
     store_b = InMemoryStore()
     processed_batch(app_engine, store_b, b, total=4, bad=0)
     with tenant_session(app_engine, tenant_id=b) as s:
@@ -1160,21 +1168,21 @@ def test_imp_17_r1_025_migration_0010_goes_down_and_up_again(
     columns = (
         "select count(*) from information_schema.columns where table_schema = 'cbam' and "
         "((table_name = 'import_batches' and column_name in "
-        "('report_layout_version_id','layout_status')) or "
+        "('report_layout_version_id','layout_status','attempts')) or "
         "(table_name = 'ref_cds_report_layouts' and column_name = 'date_format'))"
     )
     functions = (
         "select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace "
         "where n.nspname = 'cbam' and p.proname in "
-        "('source_rows_block_change', 'row_exceptions_guard')"
+        "('source_rows_block_change', 'row_exceptions_guard', 'import_rows_block_terminal')"
     )
-    assert (_scalar(tables), _scalar(columns), _scalar(functions)) == (2, 3, 2)
+    assert (_scalar(tables), _scalar(columns), _scalar(functions)) == (2, 4, 3)
     command.downgrade(cfg, "0009")
     assert (_scalar(tables), _scalar(columns), _scalar(functions)) == (0, 0, 0)
     # the 0009 guard is back, and the layout view still works
     assert _scalar("select count(*) from cbam.v_active_cds_report_layouts") is not None
     command.upgrade(cfg, "head")
-    assert (_scalar(tables), _scalar(columns), _scalar(functions)) == (2, 3, 2)
+    assert (_scalar(tables), _scalar(columns), _scalar(functions)) == (2, 4, 3)
 
 
 # --- properties --------------------------------------------------------------------------
@@ -1237,3 +1245,418 @@ def test_imp_10_r1_025_job_failures_carry_no_stored_error_text(
     assert "secret" not in str(caught.value) and caught.value.__cause__ is None
     assert caught.value.__suppress_context__
     assert batch_row(app_engine, tenant, batch.id).failure_reason == "storage_unavailable"
+
+
+# --- resource limits, crash loops, stale batches, layout dates (security and review fixes) ----
+
+
+def limits(**changes: int) -> processing.rules.ImportLimits:
+    base = processing.limits_from_settings(Settings())
+    return processing.rules.ImportLimits(**{**base.__dict__, **changes})
+
+
+def only_object(store: InMemoryStore) -> str:
+    (key,) = store.objects
+    return key
+
+
+def test_imp_18_r1_025_four_hundred_huge_headings_are_rejected_without_reading_them_all(
+    app_engine: Engine, layout: UUID
+) -> None:
+    """Security H1: a header that is 40 MB on one line is refused at the line cap."""
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    data = ("a," + ",".join("h" * 100_000 for _ in range(400)) + "\n1,2\n").encode()
+    batch = receive(app_engine, store, tenant, data, max_bytes=50_000_000)
+    assert run(app_engine, store, tenant, batch.id) == "rejected"
+    assert exceptions(app_engine, tenant, batch.id) == {(0, "", "FILE_UNREADABLE")}
+    assert scalar(app_engine, tenant, "select count(*) from cbam.source_rows") == 0
+
+
+def test_imp_18_r1_025_too_many_columns_and_too_long_headings_are_file_level_codes(
+    app_engine: Engine, layout: UUID
+) -> None:
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    wide = receive(app_engine, store, tenant, to_csv([], headers=[f"c{i}" for i in range(300)]))
+    assert run(app_engine, store, tenant, wide.id) == "rejected"
+    assert exceptions(app_engine, tenant, wide.id) == {(0, "", "HEADER_TOO_MANY_COLUMNS")}
+    long_ = receive(app_engine, store, tenant, to_csv([], headers=["h" * 300, "b"]))
+    assert run(app_engine, store, tenant, long_.id) == "rejected"
+    assert exceptions(app_engine, tenant, long_.id) == {(0, "", "HEADER_TOO_LONG")}
+    row = batch_row(app_engine, tenant, long_.id)
+    assert (row.failure_reason, row.layout_status) == ("header_too_long", "unreadable")
+
+
+def test_imp_18_r1_025_a_cell_over_the_cell_limit_or_a_row_over_the_row_limit_stops_the_file(
+    app_engine: Engine, layout: UUID
+) -> None:
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    row = good_row(2)
+    row[11] = "z" * 60
+    big_cell = receive(app_engine, store, tenant, to_csv([good_row(1), row]))
+    assert (
+        run(app_engine, store, tenant, big_cell.id, limits=limits(max_cell_chars=50)) == "rejected"
+    )
+    assert {c for _, _, c in exceptions(app_engine, tenant, big_cell.id)} == {"FILE_UNREADABLE"}
+    assert (
+        scalar(
+            app_engine,
+            tenant,
+            "select count(*) from cbam.source_rows where batch_id = :b",
+            b=big_cell.id,
+        )
+        == 1
+    )  # rows saved before the problem stay, with their counters
+    assert batch_row(app_engine, tenant, big_cell.id).rows_total == 1
+
+    multi = good_row(1)
+    multi[11] = "\n".join(["line"] * 40)  # short lines, but one record of 200+ characters
+    big_row = receive(app_engine, store, tenant, to_csv([multi]))
+    assert (
+        run(app_engine, store, tenant, big_row.id, limits=limits(max_row_chars=300)) == "rejected"
+    )
+    assert exceptions(app_engine, tenant, big_row.id) == {(0, "", "ROW_TOO_LARGE")}
+
+
+def test_imp_18_r1_025_five_thousand_comma_only_rows_are_processed_in_bounded_chunks(
+    app_engine: Engine, layout: UUID
+) -> None:
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    data = (",".join(HEADERS) + "\n" + (",".join([""] * 13) + "\n") * 5000).encode()
+    batch = receive(app_engine, store, tenant, data)
+    assert run(app_engine, store, tenant, batch.id) == "completed_with_errors"
+    row = batch_row(app_engine, tenant, batch.id)
+    assert (row.rows_total, row.rows_rejected, row.rows_valid) == (5000, 5000, 0)
+    sizes = [
+        e["rows"]
+        for e in scalar(  # type: ignore[union-attr]
+            app_engine,
+            tenant,
+            "select json_agg(after order by id) from cbam.audit_events"
+            " where action = 'import_batch.rows_processed'",
+        )
+    ]
+    assert sizes == [500] * 10
+
+
+def test_imp_18_r1_025_a_chunk_is_saved_when_its_character_budget_is_reached(
+    app_engine: Engine, layout: UUID
+) -> None:
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    batch = receive(app_engine, store, tenant, to_csv([good_row(i) for i in range(1, 31)]))
+    assert (
+        run(app_engine, store, tenant, batch.id, limits=limits(chunk_max_chars=500)) == "completed"
+    )
+    sizes = [
+        e["rows"]
+        for e in scalar(  # type: ignore[union-attr]
+            app_engine,
+            tenant,
+            "select json_agg(after order by id) from cbam.audit_events"
+            " where action = 'import_batch.rows_processed'",
+        )
+    ]
+    assert sum(sizes) == 30 and len(sizes) >= 6 and max(sizes) <= 5  # not one chunk of 30
+    assert batch_row(app_engine, tenant, batch.id).rows_total == 30
+
+
+def test_imp_18_r1_025_a_nul_character_anywhere_rejects_the_file(
+    app_engine: Engine, layout: UUID
+) -> None:
+    """Upload refuses NUL bytes already; the job refuses them too if the stored file has one."""
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    for where in ("cell", "header"):
+        data = to_csv([good_row(1), good_row(2)], headers=HEADERS)
+        store = InMemoryStore()
+        batch = receive(app_engine, store, tenant, data + f"# {where}\n".encode())
+        stored = store.objects[only_object(store)]
+        poisoned = (
+            stored.replace(b"SYNTH_MRN", b"SYNTH\x00MRN", 1)
+            if where == "header"
+            else (stored.replace(b"MRN-SENTINEL-0002", b"MRN-SENT\x00NEL-0002"))
+        )
+        store.objects[only_object(store)] = poisoned
+        assert run(app_engine, store, tenant, batch.id) == "rejected"
+        assert "FILE_UNREADABLE" in {c for _, _, c in exceptions(app_engine, tenant, batch.id)}
+
+
+def test_imp_18_r1_003_a_batch_started_too_many_times_is_failed_as_a_crash_loop(
+    app_engine: Engine, layout: UUID
+) -> None:
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    batch = receive(app_engine, store, tenant, to_csv([good_row(i) for i in range(1, 8)]))
+
+    def crash(_rows: int) -> None:
+        raise RuntimeError("killed")
+
+    for attempt in (1, 2, 3):
+        with pytest.raises(ImportJobError):
+            run(
+                app_engine,
+                store,
+                tenant,
+                batch.id,
+                chunk_rows=2,
+                after_chunk=crash,
+                limits=limits(max_attempts=3),
+            )
+        assert batch_row(app_engine, tenant, batch.id).attempts == attempt
+    assert run(app_engine, store, tenant, batch.id, limits=limits(max_attempts=3)) == "failed"
+    row = batch_row(app_engine, tenant, batch.id)
+    assert (row.status, row.failure_reason) == ("failed", "worker_crash_loop")
+    assert run(app_engine, store, tenant, batch.id) == "failed"  # and stays stopped
+
+
+def test_imp_18_r1_003_permanent_errors_fail_fast_and_are_marked_failed(
+    app_engine: Engine, layout: UUID
+) -> None:
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    with pytest.raises(ImportJobError) as caught:
+        run(app_engine, store, tenant, UUID(int=1))  # a batch that does not exist
+    assert caught.value.permanent is True
+    other = make_tenant(app_engine, "B")
+    batch = receive(app_engine, store, tenant, to_csv([good_row(1)]))
+    with pytest.raises(ImportJobError) as foreign:  # another tenant's batch looks absent
+        run(app_engine, store, other, batch.id)
+    assert foreign.value.permanent is True
+    assert batch_row(app_engine, tenant, batch.id).status == "received"  # untouched
+
+
+def test_imp_18_r1_025_an_infected_file_is_never_parsed(
+    app_engine: Engine, admin_engine: Engine, layout: UUID
+) -> None:
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    batch = receive(app_engine, store, tenant, to_csv([good_row(1)]))
+    with owner(admin_engine, tenant) as s:  # stand-in for the Phase 7 scanner
+        s.execute(
+            text("alter table cbam.document_versions disable trigger document_versions_immutable")
+        )
+        s.execute(text("update cbam.document_versions set scan_state = 'infected'"))
+        s.execute(
+            text("alter table cbam.document_versions enable trigger document_versions_immutable")
+        )
+    store.objects.clear()  # prove the file is not even opened
+    assert run(app_engine, store, tenant, batch.id) == "rejected"
+    assert exceptions(app_engine, tenant, batch.id) == {(0, "", "FILE_INFECTED")}
+    assert batch_row(app_engine, tenant, batch.id).failure_reason == "file_infected"
+
+
+def test_imp_18_r1_025_a_pending_scan_still_processes_until_phase_7_gates_on_clean(
+    app_engine: Engine, layout: UUID
+) -> None:
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    batch = receive(app_engine, store, tenant, to_csv([good_row(1)]))
+    assert (
+        scalar(app_engine, tenant, "select scan_state from cbam.document_versions") == "not_scanned"
+    )
+    assert run(app_engine, store, tenant, batch.id) == "completed"
+
+
+LAYOUT_NO_FORMAT = """report_type,column_name,maps_to,required,date_format
+import_item,Code,line.commodity_code,true,
+import_item,Accepted,declaration.acceptance_date,true,
+"""
+LAYOUT_DOUBLED = """report_type,column_name,maps_to,required,date_format
+import_item,Code,line.commodity_code,true,
+import_item,Code2,line.commodity_code,false,
+"""
+
+
+@pytest.mark.parametrize(
+    ("version", "csv_text"), [("bad.1", LAYOUT_NO_FORMAT), ("bad.2", LAYOUT_DOUBLED)]
+)
+def test_imp_19_r1_025_an_ambiguous_or_incomplete_layout_rejects_the_batch(
+    app_engine: Engine,
+    admin_engine: Engine,
+    layout: UUID,
+    tmp_path: object,
+    version: str,
+    csv_text: str,
+) -> None:
+    load(
+        app_engine,
+        write_dataset(
+            tmp_path,
+            dataset="cds_report_layouts",
+            version=version,
+            csv=csv_text,
+            source_id="BAD-LAYOUT-SOURCE",
+        ),
+    )  # type: ignore[arg-type]
+    put_source_in_force(app_engine, layout, "BAD-LAYOUT-SOURCE")
+    activate(app_engine, layout, "cds_report_layouts", version)
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    batch = receive(app_engine, store, tenant, b"Code,Code2,Accepted\n72081000,x,2027-01-01\n")
+    assert run(app_engine, store, tenant, batch.id) == "rejected"
+    assert exceptions(app_engine, tenant, batch.id) == {(0, "", "LAYOUT_INVALID")}
+    row = batch_row(app_engine, tenant, batch.id)
+    assert (row.layout_status, row.failure_reason) == ("invalid", "layout_invalid")
+
+
+def test_imp_19_r1_025_the_layout_is_chosen_for_the_date_the_report_was_acquired(
+    app_engine: Engine, admin_engine: Engine, layout: UUID, tmp_path: object
+) -> None:
+    """A new layout version applies from its own date, whatever day the job runs."""
+    load(
+        app_engine,
+        write_dataset(
+            tmp_path,  # type: ignore[arg-type]
+            dataset="cds_report_layouts",
+            version="synthetic.4",
+            csv=LAYOUT_V2,
+            source_id="LAYOUT-V4-SOURCE",
+            effective_from=date(2027, 6, 1),
+        ),
+    )
+    put_source_in_force(app_engine, layout, "LAYOUT-V4-SOURCE")
+    activate(app_engine, layout, "cds_report_layouts", "synthetic.4")
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    data = b"Commodity Code,Net Mass,Accepted\n7208100000,1.5,2027-01-05\n"
+    late = FrozenClock(datetime(2027, 9, 1, 9, 0, tzinfo=UTC))
+
+    def meta(day: date) -> ImportBatchMetadata:
+        return ImportBatchMetadata(
+            acquisition_method="get_customs_data", cds_report_type="import_item", acquired_on=day
+        )
+
+    before = receive(
+        app_engine, store, tenant, data, meta(date(2027, 3, 1)), as_of=date(2027, 12, 31)
+    )
+    # running in September does not make a March report use the June layout
+    assert run(app_engine, store, tenant, before.id, clock=late) == "rejected"
+    assert exceptions(app_engine, tenant, before.id) == {(0, "", "LAYOUT_NOT_ACTIVE")}
+    after = receive(
+        app_engine, store, tenant, data + b"\n", meta(date(2027, 7, 1)), as_of=date(2027, 12, 31)
+    )
+    assert run(app_engine, store, tenant, after.id) == "completed"  # job clock is still March
+
+
+def test_imp_19_r1_025_with_no_acquisition_date_the_received_date_is_used(
+    app_engine: Engine, layout: UUID
+) -> None:
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    batch = receive(app_engine, store, tenant, to_csv([good_row(1)]))  # created 1 March 2027
+    late = FrozenClock(datetime(2030, 1, 1, tzinfo=UTC))
+    assert run(app_engine, store, tenant, batch.id, clock=late) == "completed"
+
+
+def test_imp_20_r1_003_a_stale_received_batch_is_requeued_by_the_sweeper_and_then_processes(
+    app_engine: Engine, store: InMemoryStore, layout: UUID
+) -> None:
+    """Broker outage at upload leaves the batch `received`; the beat sweeper recovers it."""
+    from datetime import timedelta
+
+    from app.modules.imports.jobs import sweep_stale
+
+    def broken(_t: UUID, _b: UUID) -> None:
+        raise ConnectionError("redis is down")
+
+    app = create_app()
+    app.dependency_overrides[get_verifier] = verifier
+    app.dependency_overrides[get_engine_dep] = lambda: app_engine
+    app.dependency_overrides[get_clock] = lambda: FrozenClock(NOW)
+    app.dependency_overrides[get_object_store] = lambda: store
+    app.dependency_overrides[get_enqueuer] = lambda: broken
+    tenant = make_tenant(app_engine, "A")
+    headers = user_for(app_engine, tenant, "operations")
+    with TestClient(app) as c:
+        response = c.post(
+            f"/api/v1/tenants/{tenant}/import-batches",
+            files={"file": ("a.csv", to_csv([good_row(1)]), "text/csv")},
+            data={"acquisition_method": "get_customs_data", "cds_report_type": "import_item"},
+            headers=headers,
+        )
+    batch_id = UUID(response.json()["id"])
+
+    sent: list[tuple[UUID, UUID]] = []
+    fresh = FrozenClock(NOW + timedelta(minutes=5))
+    sweep_stale(app_engine, fresh, lambda t, b: sent.append((t, b)), minutes=10)
+    assert (tenant, batch_id) not in sent  # not stale yet
+    stale = FrozenClock(NOW + timedelta(minutes=11))
+    sweep_stale(app_engine, stale, lambda t, b: sent.append((t, b)), minutes=10)
+    assert (tenant, batch_id) in sent
+    # the queued job then does the work; a second sweep after completion leaves it alone
+    assert run(app_engine, store, tenant, batch_id) == "completed"
+    sent.clear()
+    sweep_stale(app_engine, stale, lambda t, b: sent.append((t, b)), minutes=10)
+    assert (tenant, batch_id) not in sent
+    # a broker that is still down does not break the sweep
+    assert sweep_stale(app_engine, stale, broken, minutes=10) >= 0
+
+
+def test_imp_20_r1_003_the_sweeper_task_is_scheduled_by_beat() -> None:
+    from app.core.jobs import celery_app
+
+    entry = celery_app.conf.beat_schedule["imports-sweep-stale-batches"]
+    assert entry["task"] == "imports.sweep_stale_batches"
+    assert entry["schedule"] <= 300
+
+
+def test_imp_21_r1_025_no_rows_or_exceptions_can_be_added_to_a_final_batch(
+    app_engine: Engine, admin_engine: Engine, layout: UUID
+) -> None:
+    """M2: enforced by a trigger, for the app role and for the owner. The job's own flow
+    (rows, then the final status) is the other tests in this file."""
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    batch, _ = processed_batch(app_engine, store, tenant, total=5, bad=1)
+    row_sql = (
+        "insert into cbam.source_rows (id, tenant_id, batch_id, row_number, raw, row_sha256)"
+        " values (gen_random_uuid(), :t, :b, 999, '{}', repeat('a', 64))"
+    )
+    exc_sql = (
+        "insert into cbam.row_exceptions (id, tenant_id, batch_id, row_number, field, code,"
+        " severity, message) values (gen_random_uuid(), :t, :b, 0, '', 'X', 'error', 'm')"
+    )
+    params = {"t": tenant, "b": batch.id}
+    for statement in (row_sql, exc_sql):
+        with pytest.raises(DBAPIError, match="is final"):
+            sql(app_engine, tenant, statement, **params)
+        with pytest.raises(DBAPIError, match="is final"), owner(admin_engine, tenant) as s:
+            s.execute(text(statement), params)
+    for status in ("failed", "rejected"):
+        other = receive(
+            app_engine, InMemoryStore(), tenant, to_csv([good_row(3)]) + status.encode()
+        )
+        with owner(admin_engine, tenant) as s:
+            s.execute(
+                text("update cbam.import_batches set status = :s where id = :b"),
+                {"s": status, "b": other.id},
+            )
+        with pytest.raises(DBAPIError, match="is final"):
+            sql(app_engine, tenant, exc_sql, t=tenant, b=other.id)
+
+
+def test_imp_21_r1_025_once_resolved_the_whole_resolution_is_locked(
+    app_engine: Engine, layout: UUID
+) -> None:
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    processed_batch(app_engine, store, tenant, total=10, bad=2)
+    one = "(select id from cbam.row_exceptions order by id limit 1)"
+    sql(
+        app_engine,
+        tenant,
+        "update cbam.row_exceptions set status = 'waived', resolved_at = now(),"  # noqa: S608
+        f" resolution_reason = 'ok' where id = {one}",
+    )
+    for change in (
+        "resolution_reason = 'changed'",
+        "resolved_at = now() + interval '1 day'",
+        f"resolved_by = '{uuid7()}'",
+    ):
+        with pytest.raises(DBAPIError, match="cannot change again"):
+            sql(app_engine, tenant, f"update cbam.row_exceptions set {change} where id = {one}")  # noqa: S608
+
+
+def test_imp_21_r1_025_a_huge_or_negative_cursor_is_a_clean_422(
+    client: TestClient, app_engine: Engine, store: InMemoryStore, layout: UUID
+) -> None:
+    from app.core.pagination import encode_cursor
+
+    tenant = make_tenant(app_engine, "A")
+    headers = user_for(app_engine, tenant, "operations")
+    batch, _ = processed_batch(app_engine, store, tenant, total=10, bad=2)
+    for r in (10**12, -1, 2**63):
+        cursor = encode_cursor({"r": r, "i": str(uuid7())})
+        response = client.get(
+            url(tenant, batch.id, "/exceptions"), params={"cursor": cursor}, headers=headers
+        )
+        assert response.status_code == 422, r

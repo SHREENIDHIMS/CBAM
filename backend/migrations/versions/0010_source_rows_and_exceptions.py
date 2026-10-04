@@ -11,7 +11,7 @@ resolution columns can change, and only from `open` forward. Codes are short upp
 the message is fixed text per code: never a cell value (the report is exported).
 
 `import_batches` gains the reference-data layout version it was read with and a short
-`layout_status`. `ref_cds_report_layouts` gains an optional `date_format` (the format a layout
+`layout_status`, and an `attempts` counter (crash-loop guard). `ref_cds_report_layouts` gains an optional `date_format` (the format a layout
 declares for a date column); its `v_active_` view is rebuilt to expose it.
 """
 
@@ -27,7 +27,8 @@ alter table cbam.import_batches add constraint import_batches_tenant_id_key uniq
 alter table cbam.import_batches
   add column report_layout_version_id uuid references cbam.ref_dataset_versions (id),
   add column layout_status text
-    check (layout_status in ('matched','not_active','columns_missing','unreadable'));
+    check (layout_status in ('matched','not_active','columns_missing','unreadable','invalid')),
+  add column attempts integer not null default 0 check (attempts >= 0);
 
 create or replace function cbam.import_batches_guard() returns trigger language plpgsql as $$
 declare
@@ -124,8 +125,10 @@ begin
       old.code, old.severity, old.message, old.created_at) then
     raise exception 'row exception facts are immutable; only the resolution can change';
   end if;
-  if old.status <> 'open' and new.status <> old.status then
-    raise exception 'a resolved or waived exception cannot change status again';
+  if old.status <> 'open' and (new.status, new.resolved_by, new.resolved_at,
+      new.resolution_reason) is distinct from
+     (old.status, old.resolved_by, old.resolved_at, old.resolution_reason) then
+    raise exception 'a resolved or waived exception cannot change again';
   end if;
   return new;
 end $$;
@@ -133,6 +136,24 @@ create trigger row_exceptions_guard before update or delete on cbam.row_exceptio
   for each row execute function cbam.row_exceptions_guard();
 create trigger row_exceptions_no_truncate before truncate on cbam.row_exceptions
   for each statement execute function cbam.row_exceptions_guard();
+
+-- Rows and exceptions are only ever added while a batch is still being processed.
+create function cbam.import_rows_block_terminal() returns trigger language plpgsql as $$
+declare
+  batch_status text;
+begin
+  select status into batch_status from cbam.import_batches
+   where tenant_id = new.tenant_id and id = new.batch_id;
+  if batch_status in ('completed','completed_with_errors','failed','rejected') then
+    raise exception 'import batch % is final (%): no rows or exceptions can be added',
+      new.batch_id, batch_status;
+  end if;
+  return new;
+end $$;
+create trigger source_rows_batch_open before insert on cbam.source_rows
+  for each row execute function cbam.import_rows_block_terminal();
+create trigger row_exceptions_batch_open before insert on cbam.row_exceptions
+  for each row execute function cbam.import_rows_block_terminal();
 
 alter table cbam.source_rows enable row level security;
 alter table cbam.source_rows force row level security;
@@ -185,6 +206,7 @@ revoke insert, update, delete, truncate on cbam.v_active_cds_report_layouts from
 drop table cbam.row_exceptions;
 drop table cbam.source_rows;
 drop function cbam.row_exceptions_guard();
+drop function cbam.import_rows_block_terminal();
 drop function cbam.source_rows_block_change();
 
 create or replace function cbam.import_batches_guard() returns trigger language plpgsql as $$
@@ -218,6 +240,7 @@ begin
   return new;
 end $$;
 alter table cbam.import_batches
+  drop column attempts,
   drop column layout_status,
   drop column report_layout_version_id;
 alter table cbam.import_batches drop constraint import_batches_tenant_id_key;

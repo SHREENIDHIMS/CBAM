@@ -8,7 +8,7 @@ import codecs
 import hashlib
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
@@ -187,7 +187,6 @@ CANONICAL_FIELDS: frozenset[str] = frozenset(
 # source money NUMERIC(24,8). These are storage limits, not regulatory values.
 _MASS_INT_DIGITS, _MASS_SCALE = 14, 6
 _VALUE_INT_DIGITS, _VALUE_SCALE = 16, 8
-DEFAULT_DATE_FORMAT = "%Y-%m-%d"  # when a layout row declares none
 
 # code -> (severity, fixed message). Messages never contain a cell value: a cell can be
 # personal or commercial data, and the report is exported (docs/SECURITY.md).
@@ -238,10 +237,47 @@ ISSUES: dict[str, tuple[str, str]] = {
         "error",
         "The currency must be a 3-letter code in capitals, such as EUR.",
     ),
-    "SUPPLIER_UNMAPPED": (
+    "SUPPLIER_MISSING": (
         "warning",
-        "No supplier is named on this row, so it cannot be linked to a supplier yet. "
+        "No supplier is named on this row, so it cannot be linked to a supplier. "
         "This does not stop the row being used.",
+    ),
+    "EORI_MISSING": ("error", "The EORI is empty. Fill it in and re-upload."),
+    "VALUATION_BASIS_MISSING": (
+        "error",
+        "The valuation method is empty. Fill it in and re-upload.",
+    ),
+    "CPC_MISSING": ("error", "The customs procedure code is empty. Fill it in and re-upload."),
+    "DESCRIPTION_MISSING": ("error", "The goods description is empty. Fill it in and re-upload."),
+    "VALUE_PRECISION": (
+        "error",
+        "The customs value has more than 8 decimal places. It is not rounded for you: "
+        "correct it at source and re-upload.",
+    ),
+    "ROW_TOO_LARGE": (
+        "error",
+        "A row is larger than the allowed size. Split the file or shorten the cells "
+        "and upload it again.",
+    ),
+    "HEADER_TOO_MANY_COLUMNS": (
+        "error",
+        "The header row has more columns than are allowed. Remove unused columns and "
+        "upload the file again.",
+    ),
+    "HEADER_TOO_LONG": (
+        "error",
+        "A heading in the header row is longer than allowed. Check that the first row "
+        "is the real header row and upload again.",
+    ),
+    "LAYOUT_INVALID": (
+        "error",
+        "The active column layout is incomplete or ambiguous, so the file cannot be read. "
+        "Ask the domain owner to fix the layout, then upload the file again.",
+    ),
+    "FILE_INFECTED": (
+        "error",
+        "The file was flagged by the malware scan and was not read. Do not open it; "
+        "get a clean copy and upload it again.",
     ),
     "ROW_TOO_LONG": (
         "error",
@@ -289,10 +325,21 @@ FILE_LEVEL_CODES: frozenset[str] = frozenset(
         "REPORT_TYPE_MISSING",
         "LAYOUT_NOT_ACTIVE",
         "FILE_UNREADABLE",
+        "HEADER_TOO_MANY_COLUMNS",
+        "HEADER_TOO_LONG",
+        "ROW_TOO_LARGE",
+        "LAYOUT_INVALID",
+        "FILE_INFECTED",
     }
 )
 
-LAYOUT_STATUSES: tuple[str, ...] = ("matched", "not_active", "columns_missing", "unreadable")
+LAYOUT_STATUSES: tuple[str, ...] = (
+    "matched",
+    "not_active",
+    "columns_missing",
+    "unreadable",
+    "invalid",
+)
 EXTRA_CELLS_KEY = "__extra_cells__"
 
 
@@ -330,6 +377,47 @@ def layout_columns(rows: Sequence[Mapping[str, Any]], report_type: str) -> tuple
         for r in rows
         if r["report_type"] == report_type
     )
+
+
+def layout_is_invalid(columns: Sequence[LayoutColumn]) -> bool:
+    """A layout we must not guess about: a date column without its declared format, or two
+    columns mapped to the same canonical field (one would silently overwrite the other)."""
+    seen: set[str] = set()
+    for col in columns:
+        if col.maps_to not in CANONICAL_FIELDS:
+            continue
+        if col.maps_to in seen:
+            return True
+        seen.add(col.maps_to)
+        if col.maps_to == "declaration.acceptance_date" and not col.date_format:
+            return True
+    return False
+
+
+@dataclass(frozen=True)
+class ImportLimits:
+    """Operational limits for reading one file (settings, not law)."""
+
+    max_columns: int
+    max_heading_chars: int
+    max_cell_chars: int
+    max_row_chars: int
+    chunk_max_chars: int
+    max_attempts: int
+
+
+def header_problem(cells: Sequence[str], limits: ImportLimits) -> str | None:
+    """A file-level code if the header row breaks a limit, else None."""
+    if len(cells) > limits.max_columns:
+        return "HEADER_TOO_MANY_COLUMNS"
+    if any(len(c) > limits.max_heading_chars for c in cells):
+        return "HEADER_TOO_LONG"
+    return None
+
+
+def row_chars(cells: Sequence[str]) -> int:
+    """Size of a row for the row and chunk budgets (characters in all cells)."""
+    return sum(len(c) for c in cells) + len(cells)
 
 
 def _norm(heading: str) -> str:
@@ -462,68 +550,85 @@ def parse_date(text: str, date_format: str) -> date | None:
         return None
 
 
-def validate_row(row: MappedRow) -> tuple[Issue, ...]:
-    """Format and presence problems for the fields the layout maps. Never raises, whatever the
-    cell text. An empty cell is a problem only where the layout marks the column required."""
-    issues: list[Issue] = []
+def _check_item_no(value: str) -> str | None:
+    return None if _ITEM_NO.match(value) and int(value) >= 1 else "ITEM_NO_INVALID"
 
-    def cell(field: str) -> str | None:
-        if field not in row.mapped:
-            return None
-        value = row.values.get(field, "").strip()
-        if value == "":
-            if field in row.required:
-                issues.append(Issue(_MISSING[field], field))
-            return None
-        return value
 
-    cell("declaration.mrn")
-    if (value := cell("declaration.acceptance_date")) is not None and (
-        parse_date(value, row.date_formats.get("declaration.acceptance_date", DEFAULT_DATE_FORMAT))
-        is None
-    ):
-        issues.append(Issue("ACCEPTANCE_DATE_INVALID", "declaration.acceptance_date"))
-    if (value := cell("line.item_no")) is not None and (
-        _ITEM_NO.match(value) is None or int(value) < 1
-    ):
-        issues.append(Issue("ITEM_NO_INVALID", "line.item_no"))
-    if (value := cell("line.commodity_code")) is not None and _COMMODITY.match(value) is None:
-        issues.append(Issue("COMMODITY_CODE_INVALID", "line.commodity_code"))
-    if (value := cell("line.net_mass_kg")) is not None:
-        number, precise = parse_plain_decimal(value, int_digits=_MASS_INT_DIGITS, scale=_MASS_SCALE)
-        if precise:
-            issues.append(Issue("NET_MASS_PRECISION", "line.net_mass_kg"))
-        elif number is None:
-            issues.append(Issue("NET_MASS_INVALID", "line.net_mass_kg"))
-    if (value := cell("line.customs_value")) is not None:
-        number, precise = parse_plain_decimal(
-            value, int_digits=_VALUE_INT_DIGITS, scale=_VALUE_SCALE
-        )
-        if number is None:
-            issues.append(Issue("VALUE_INVALID", "line.customs_value"))
-    if (value := cell("line.customs_value_currency")) is not None and (
-        _CURRENCY.match(value) is None
-    ):
-        issues.append(Issue("CURRENCY_INVALID", "line.customs_value_currency"))
-    if (value := cell("line.origin_country")) is not None and _COUNTRY.match(value) is None:
-        issues.append(Issue("ORIGIN_INVALID", "line.origin_country"))
-    # No supplier register exists until Phase 6, so a named supplier cannot be mapped yet and
-    # is not flagged. A row that names none at all is a non-blocking warning.
-    if "line.supplier_ref" in row.mapped and not row.values.get("line.supplier_ref", "").strip():
-        issues.append(Issue("SUPPLIER_UNMAPPED", "line.supplier_ref"))
-    return tuple(issues)
+def _check_commodity(value: str) -> str | None:
+    # PROVISIONAL structural check (R1-005, R1-052; docs/OPEN_DECISIONS.md): 8 to 10 digits.
+    # The exact code is preserved and nothing checks that it exists in the tariff.
+    return None if _COMMODITY.match(value) else "COMMODITY_CODE_INVALID"
 
+
+def _check_mass(value: str) -> str | None:
+    number, precise = parse_plain_decimal(value, int_digits=_MASS_INT_DIGITS, scale=_MASS_SCALE)
+    if precise:
+        return "NET_MASS_PRECISION"
+    return None if number is not None else "NET_MASS_INVALID"
+
+
+def _check_value(value: str) -> str | None:
+    number, precise = parse_plain_decimal(value, int_digits=_VALUE_INT_DIGITS, scale=_VALUE_SCALE)
+    if precise:
+        return "VALUE_PRECISION"
+    return None if number is not None else "VALUE_INVALID"
+
+
+def _check_currency(value: str) -> str | None:
+    return None if _CURRENCY.match(value) else "CURRENCY_INVALID"
+
+
+def _check_origin(value: str) -> str | None:
+    return None if _COUNTRY.match(value) else "ORIGIN_INVALID"
+
+
+_SHAPE_CHECKS: dict[str, Callable[[str], str | None]] = {
+    "line.item_no": _check_item_no,
+    "line.commodity_code": _check_commodity,
+    "line.net_mass_kg": _check_mass,
+    "line.customs_value": _check_value,
+    "line.customs_value_currency": _check_currency,
+    "line.origin_country": _check_origin,
+}
 
 _MISSING: dict[str, str] = {
     "declaration.mrn": "MRN_MISSING",
     "declaration.acceptance_date": "ACCEPTANCE_DATE_MISSING",
+    "declaration.eori": "EORI_MISSING",
     "line.item_no": "ITEM_NO_MISSING",
     "line.commodity_code": "COMMODITY_CODE_MISSING",
     "line.net_mass_kg": "NET_MASS_MISSING",
     "line.customs_value": "VALUE_MISSING",
     "line.customs_value_currency": "CURRENCY_MISSING",
     "line.origin_country": "ORIGIN_MISSING",
+    "line.valuation_basis": "VALUATION_BASIS_MISSING",
+    "line.cpc": "CPC_MISSING",
+    "line.supplier_ref": "SUPPLIER_MISSING",
+    "line.description": "DESCRIPTION_MISSING",
 }
+
+
+def validate_row(row: MappedRow) -> tuple[Issue, ...]:
+    """Format and presence problems for the fields the layout maps. Never raises, whatever the
+    cell text. An empty cell is an error wherever the layout marks the column required; an empty
+    supplier is always only a warning (supplier matching arrives with the register, Phase 6)."""
+    issues: list[Issue] = []
+    for field in sorted(row.mapped):
+        value = row.values.get(field, "").strip()
+        if value == "":
+            if field == "line.supplier_ref" or field in row.required:
+                issues.append(Issue(_MISSING[field], field))
+            continue
+        if field == "declaration.acceptance_date":
+            date_format = row.date_formats.get(field)
+            if date_format is None or parse_date(value, date_format) is None:
+                issues.append(Issue("ACCEPTANCE_DATE_INVALID", field))
+            continue
+        check = _SHAPE_CHECKS.get(field)
+        code = check(value) if check else None
+        if code:
+            issues.append(Issue(code, field))
+    return tuple(issues)
 
 
 def row_is_valid(issues: Sequence[Issue]) -> bool:
@@ -531,10 +636,30 @@ def row_is_valid(issues: Sequence[Issue]) -> bool:
     return all(issue_severity(i.code) != "error" for i in issues)
 
 
-_CSV_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+_CSV_FORMULA_START = (
+    "=",
+    "+",
+    "-",
+    "@",
+    ";",
+    "|",
+    "\t",
+    "\r",
+    "\n",
+    "\uff1d",  # fullwidth = + - @
+    "\uff0b",
+    "\uff0d",
+    "\uff20",
+)
+_CSV_SKIPPED = " \t\r\n\u00a0'\""
 
 
 def csv_safe(value: str) -> str:
-    """Stop spreadsheet formula injection: a cell that starts with = + - @ tab or CR gets a
-    leading apostrophe (docs/SECURITY.md files checklist). Applied to every exported cell."""
-    return "'" + value if value.startswith(_CSV_FORMULA_START) else value
+    """Stop spreadsheet formula injection: a cell that starts (after any spaces or quotes) with
+    = + - @ ; | their fullwidth forms, or starts with tab, CR or LF, gets a leading apostrophe
+    (docs/SECURITY.md files checklist). Applied to every exported cell."""
+    if value.startswith(("\t", "\r", "\n")) or value.lstrip(_CSV_SKIPPED).startswith(
+        _CSV_FORMULA_START
+    ):
+        return "'" + value
+    return value

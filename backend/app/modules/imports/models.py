@@ -71,6 +71,7 @@ import_batches = Table(
     Column("failure_reason", Text),
     Column("report_layout_version_id", Uuid),
     Column("layout_status", Text),
+    Column("attempts", Integer, nullable=False),
     Column("created_at", DateTime(timezone=True)),
     Column("created_by", Uuid),
     Column("updated_at", DateTime(timezone=True)),

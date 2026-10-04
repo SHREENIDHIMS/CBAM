@@ -92,14 +92,15 @@ async def create_import_batch(
 ) -> ImportBatchCreated:
     """Upload a customs file. 202 for a new batch, 200 with `replayed: true` for a file that
     was already received (same SHA-256 and same declared details). A new batch is queued for
-    processing after it is saved; a replay is not queued again."""
+    processing after it is saved; a replay is queued again only if its job never started."""
     max_bytes = settings.import_max_file_bytes
     service.upload_limiter.acquire(ctx.tenant_id, settings.import_max_concurrent_uploads_per_tenant)
     try:
         result = await _receive(request, response, ctx, clock, store, idempotency_key, max_bytes)
     finally:
         service.upload_limiter.release(ctx.tenant_id)
-    if not result.replayed:
+    # A replay of a batch whose job never started is queued again (the job is idempotent).
+    if not result.replayed or result.status in ("received", "queued"):
         await run_in_threadpool(safe_enqueue, enqueue, ctx.tenant_id, result.id)
     return result
 

@@ -6,6 +6,7 @@ import pytest
 
 from app.core.jobs import celery_app
 from app.modules.imports import jobs
+from app.modules.imports.processing import ImportJobError
 
 
 def test_r1_003_the_task_is_registered_acks_late_and_retries_with_a_cap() -> None:
@@ -35,3 +36,34 @@ def test_r1_003_a_broker_failure_is_swallowed_and_logged_by_id_only() -> None:
 
     assert jobs.safe_enqueue(broken, uuid4(), uuid4()) is False
     assert jobs.safe_enqueue(lambda _t, _b: None, uuid4(), uuid4()) is True
+
+
+def test_r1_025_a_permanent_job_error_is_not_retried_with_backoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[int] = []
+
+    def permanent(*_a: object, **_k: object) -> str:
+        calls.append(1)
+        raise ImportJobError("TenantMismatchError", permanent=True)
+
+    monkeypatch.setattr(jobs, "process_batch", permanent)
+    monkeypatch.setattr(jobs, "get_engine", lambda: None)
+    monkeypatch.setattr(jobs, "get_object_store", lambda: None)
+    result = jobs.process_batch_task.apply(args=[str(uuid4()), str(uuid4())])
+    assert result.state == "FAILURE"
+    assert calls == [1]  # one try, no backoff retries
+
+
+def test_r1_003_a_transient_error_asks_for_a_retry_with_growing_backoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def transient(*_a: object, **_k: object) -> str:
+        raise ImportJobError("StorageError")
+
+    monkeypatch.setattr(jobs, "process_batch", transient)
+    monkeypatch.setattr(jobs, "get_engine", lambda: None)
+    monkeypatch.setattr(jobs, "get_object_store", lambda: None)
+    result = jobs.process_batch_task.apply(args=[str(uuid4()), str(uuid4())])
+    assert result.state == "FAILURE"  # eager mode re-runs up to max_retries then gives up
+    assert jobs.process_batch_task.reject_on_worker_lost is False

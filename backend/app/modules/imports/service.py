@@ -10,7 +10,7 @@ from datetime import date, datetime
 from typing import Any, BinaryIO
 from uuid import UUID
 
-from sqlalchemy import Row, insert, select, text, tuple_
+from sqlalchemy import Row, func, insert, select, text, tuple_
 from sqlalchemy.orm import Session
 
 from app.core.audit import ActorType, record
@@ -503,6 +503,7 @@ def advance_batch(
     return _out(updated)
 
 
+_MAX_ROW_NUMBER = 2**31 - 1
 _EXCEPTION_SEVERITIES = ("error", "warning")
 _EXCEPTION_STATUSES = ("open", "resolved", "waived")
 
@@ -552,7 +553,9 @@ def _exception_page(
         c = decode_cursor(cursor)
         try:
             after = (int(c["r"]), UUID(str(c["i"])))
-        except (KeyError, ValueError, TypeError) as exc:
+            if not 0 <= after[0] <= _MAX_ROW_NUMBER:
+                raise ValueError("row number out of range")
+        except (KeyError, ValueError, TypeError, OverflowError) as exc:
             raise InvalidRequestError("The cursor is not valid") from exc
         query = query.where(tuple_(row_exceptions.c.row_number, row_exceptions.c.id) > after)
     rows = session.execute(
@@ -713,3 +716,19 @@ def retry_batch(
         )
     ).one()
     return _created(row, replayed=False)
+
+
+def stale_batch_ids(session: Session, tenant_id: UUID, *, older_than: datetime) -> list[UUID]:
+    """Batches still `received` or `queued` since before `older_than`: their job was lost
+    (broker outage at upload, worker lost before it started)."""
+    rows = session.execute(
+        select(import_batches.c.id)
+        .where(
+            import_batches.c.tenant_id == tenant_id,
+            import_batches.c.status.in_(("received", "queued")),
+            func.coalesce(import_batches.c.updated_at, import_batches.c.created_at) < older_than,
+        )
+        .order_by(import_batches.c.id)
+        .limit(1000)
+    ).scalars()
+    return list(rows)
