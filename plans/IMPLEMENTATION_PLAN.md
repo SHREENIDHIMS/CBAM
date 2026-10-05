@@ -170,7 +170,10 @@ clock, money, decisions, tasks.
    net mass kg (6 dp), customs value + valuation basis, origin as declared (R1-005, R1-010).
    *Customs value is kept in its own currency; the GBP value is set only for GBP (FX is Phase 10).
    Append-only tables with source lineage (`import_line_sources`); a changed source row is a new
-   version; overlapping files add `duplicate_seen` links only.*
+   version; overlapping files add `duplicate_seen` links only. Stale data never supersedes: a row
+   equal to ANY earlier version is only a sighting, a file never supersedes a correction or manual
+   entry (`SOURCE_CONFLICTS_WITH_CORRECTION`), and an older report never replaces a newer one
+   (`OLDER_EXTRACT_CONFLICT`); rows of one file that disagree are ALL rejected.*
 5. - [x] Importer / declarant / agent / acting-on-behalf relationships (R1-006).
    *Captured as FIELDS only (party EORIs and `representation_type` as reported, never inferred);
    no liable-person logic here: that is step 6 (PR4). Real-report mapping: DATA-DEC-025.*
@@ -189,7 +192,7 @@ clock, money, decisions, tasks.
    every cell that came from an uploaded file (docs/SECURITY.md files checklist).
 
 **Exit gate**
-- [x] **500-row CDS file imports cleanly with errors reported per row** (handbook gate) — *proven end to end by IMP-10 and IMP-28 (500 rows, 37 seeded bad rows: 463 lines and 37 exceptions) with the synthetic PROVISIONAL layout; re-run against the real masked layout when step 1 lands (DATA-DEC-002)*
+- [ ] **500-row CDS file imports cleanly with errors reported per row** (handbook gate) — *proven on the provisional synthetic layout by IMP-10/IMP-45 (463 lines and 37 exceptions); tick when re-run on a real masked HMRC report (DATA-DEC-002)*
 - [ ] A year of fixture "Get customs data" reports loads without duplicates and a missing window shows as a gap with a task
 - [x] Replaying a file creates no duplicate business records
 - [x] Every line links to its exact source row and file
@@ -204,6 +207,10 @@ clock, money, decisions, tasks.
 
 1. - [ ] Scope rule: commodity code at tax-point date against active code list →
    in/out + rule/dataset version (R1-007).
+   *Declaration facts (acceptance date, parties, representation) used here and by the tax-point
+   step 5 must come from the CURRENT declaration version resolved by MRN
+   (`ledger.current_declaration`); never read `import_lines.declaration_id` directly: a line keeps
+   the declaration version it was created under, which may since have been superseded.*
 2. - [ ] Geography facts: GB/XI EORI context, NI, Crown Dependencies, Overseas Territories,
    UK Continental Shelf; rules via `ref_geography_rules` (R1-009).
 3. - [ ] Origin: declared vs validated origin, evidence links, UK-origin exemption only with
