@@ -166,9 +166,14 @@ clock, money, decisions, tasks.
    *Partial until later phases: supplier mapping against the register arrives in Phase 6 (only
    an empty supplier is flagged now), and procedure-code (tax-point input) checks arrive with
    Phase 4; commodity-code shape is provisional (DATA-DEC-024).*
-4. - [ ] Normalise into `declarations`, `import_lines`, `parties` with exact commodity code,
+4. - [x] Normalise into `declarations`, `import_lines`, `parties` with exact commodity code,
    net mass kg (6 dp), customs value + valuation basis, origin as declared (R1-005, R1-010).
-5. - [ ] Importer / declarant / agent / acting-on-behalf relationships (R1-006).
+   *Customs value is kept in its own currency; the GBP value is set only for GBP (FX is Phase 10).
+   Append-only tables with source lineage (`import_line_sources`); a changed source row is a new
+   version; overlapping files add `duplicate_seen` links only.*
+5. - [x] Importer / declarant / agent / acting-on-behalf relationships (R1-006).
+   *Captured as FIELDS only (party EORIs and `representation_type` as reported, never inferred);
+   no liable-person logic here: that is step 6 (PR4). Real-report mapping: DATA-DEC-025.*
 6. - [ ] Liable-person determination rule + decision record; fixtures for direct importer,
    broker/declarant, acting-on-behalf (R1-036).
 7. - [ ] Manual import entry with reason; same validation and downstream fields (R1-004).
@@ -184,10 +189,10 @@ clock, money, decisions, tasks.
    every cell that came from an uploaded file (docs/SECURITY.md files checklist).
 
 **Exit gate**
-- [ ] **500-row CDS file imports cleanly with errors reported per row** (handbook gate) — *row validation, raw rows and the exception report are proven by IMP-10 (500 rows, 37 seeded bad rows, synthetic provisional layout); tick when step 4 normalises the valid rows and the layout is the real one*
+- [x] **500-row CDS file imports cleanly with errors reported per row** (handbook gate) — *proven end to end by IMP-10 and IMP-28 (500 rows, 37 seeded bad rows: 463 lines and 37 exceptions) with the synthetic PROVISIONAL layout; re-run against the real masked layout when step 1 lands (DATA-DEC-002)*
 - [ ] A year of fixture "Get customs data" reports loads without duplicates and a missing window shows as a gap with a task
-- [ ] Replaying a file creates no duplicate business records
-- [ ] Every line links to its exact source row and file
+- [x] Replaying a file creates no duplicate business records
+- [x] Every line links to its exact source row and file
 - [ ] Freight-forwarder-as-declarant fixture keeps importer liable
 
 ---

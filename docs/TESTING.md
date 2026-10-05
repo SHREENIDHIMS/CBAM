@@ -97,6 +97,24 @@ headings, too many columns, long headings, cell and row caps, 5,000 comma-only r
 character budget, NUL, crash-loop guard, permanent errors, infected file); IMP-19 ambiguous or
 incomplete layout, layout chosen by acquisition date; IMP-20 beat sweeper recovers a batch
 after a broker outage; IMP-22 lease takeover of a killed worker, crash-loop failure, duplicate deliveries count once, lease renewed per chunk, attempts never go down; IMP-23 quoted-newline record attacks stopped by the record guard (with a bounded-memory test) and honest quoted newlines, CRLF and BOM still import; IMP-21 no rows for a final batch, resolution lock, cursor range.
+Normalisation scenario IDs (Phase 3 steps 4 and 5; backend `tests/integration/test_import_lines.py`,
+`test_import_leases.py` and `tests/unit/test_import_normalisation.py`). These numbers are used by the
+normalisation work and are separate from the IMP-20 to IMP-23 of `test_import_processing.py`
+above. IMP-20 (exit gate: replay) replaying a file or an overlapping file, also processed at once
+or resumed after a crash, creates no declaration or line and records `duplicate_seen`; IMP-21
+(exit gate: lineage) every line resolves to its source row, batch and file SHA-256; IMP-22 a
+changed source row is version 2 and keeps version 1, a changed declaration is version 2, conflicts
+inside one file are exceptions; IMP-23 exact commodity code and mass at 6 places; IMP-24 the four
+tables are append-only for the app and the owner, value fields cannot change in place, a
+correction needs a reason and a valid chain; IMP-25 no tax point, scope, quarter or threshold
+column or field, acceptance date never copied; IMP-26 customs value: GBP only for GBP, never
+rounded, no FX; IMP-27 rows with errors never normalise, warning-only rows do; IMP-28 the 500-row
+gate end to end (463 lines, 37 exceptions) and chunk audit events of counts and at most 500 ids;
+IMP-29 tenant isolation and the app-level filter with RLS off; IMP-30 hashing, reconciliation and
+no float (hypothesis); IMP-31 the value-correction guard and the `imports:correct` permission;
+IMP-32 the commodity-code impact function (counts only, locked down) and the Phase 2 report;
+IMP-33 the ledger API (filters, pagination, detail with raw rows and file hash, permissions);
+IMP-34 to IMP-36 lease owner token, release after a handled failure, time-based renewal.
 
 ### Portal extras (R1-055, R1-056)
 EU template fixture pre-fills the form with `EU_TEMPLATE` provenance; unknown template
