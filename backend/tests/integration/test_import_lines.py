@@ -1,11 +1,11 @@
 # ruff: noqa: F811, S608 - imported pytest fixtures are test arguments; SQL text is test-only
 """R1-005 / R1-006 / R1-010 normalisation into parties, declarations and import lines, with lineage.
 
-Scenario IDs: IMP-20 replay and overlap create no duplicates (Phase 3 exit gate 3), IMP-21 every
-line resolves to its source row, batch and file hash (exit gate 4), IMP-22 a changed source row is
-a new version, IMP-23 exact code and mass, IMP-24 append-only tables, IMP-25 no tax point or
-scope anywhere, IMP-26 customs value, IMP-27 rows with errors never normalise, IMP-28 the 500-row
-gate, IMP-29 tenant isolation, IMP-32 impact provider, IMP-33 API.
+Scenario IDs: IMP-37 replay and overlap create no duplicates (Phase 3 exit gate 3), IMP-38 every
+line resolves to its source row, batch and file hash (exit gate 4), IMP-39 a changed source row is
+a new version, IMP-40 exact code and mass, IMP-41 append-only tables, IMP-42 no tax point or
+scope anywhere, IMP-43 customs value, IMP-44 rows with errors never normalise, IMP-45 the 500-row
+gate, IMP-46 tenant isolation, IMP-49 impact provider, IMP-50 API.
 
 Product rules, not law: no regulatory source applies. The layout is the PROVISIONAL synthetic
 fixture (DATA-DEC-002); every value is synthetic.
@@ -88,10 +88,10 @@ def import_rows(
     return batch.id
 
 
-# --- IMP-20: replay and overlapping files (exit gate 3) ---------------------------------------
+# --- IMP-37: replay and overlapping files (exit gate 3) ---------------------------------------
 
 
-def test_imp_20_r1_003_replaying_a_file_creates_no_new_declarations_or_lines(
+def test_imp_37_r1_003_replaying_a_file_creates_no_new_declarations_or_lines(
     app_engine: Engine, layout: UUID
 ) -> None:
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
@@ -114,7 +114,7 @@ def test_imp_20_r1_003_replaying_a_file_creates_no_new_declarations_or_lines(
 TABLES = ("declarations", "import_lines", "import_line_sources", "parties")
 
 
-def test_imp_20_r1_003_an_overlapping_file_records_sightings_but_creates_nothing_new(
+def test_imp_37_r1_003_an_overlapping_file_records_sightings_but_creates_nothing_new(
     app_engine: Engine, layout: UUID
 ) -> None:
     """Two 31-day-style reports that share days: different bytes, same rows for the overlap."""
@@ -138,7 +138,7 @@ def test_imp_20_r1_003_an_overlapping_file_records_sightings_but_creates_nothing
     assert {(x, y) for x, y in seen} == {(one, two)}  # the sighting points at the first line
 
 
-def test_imp_20_r1_003_two_overlapping_files_processed_at_once_make_no_duplicates(
+def test_imp_37_r1_003_two_overlapping_files_processed_at_once_make_no_duplicates(
     app_engine: Engine, layout: UUID
 ) -> None:
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
@@ -156,7 +156,7 @@ def test_imp_20_r1_003_two_overlapping_files_processed_at_once_make_no_duplicate
     assert created == 60
 
 
-def test_imp_20_r1_003_a_crash_while_normalising_resumes_without_duplicates(
+def test_imp_37_r1_003_a_crash_while_normalising_resumes_without_duplicates(
     app_engine: Engine, layout: UUID
 ) -> None:
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
@@ -176,10 +176,10 @@ def test_imp_20_r1_003_a_crash_while_normalising_resumes_without_duplicates(
     assert count(app_engine, tenant, "import_line_sources") == 50
 
 
-# --- IMP-21: lineage (exit gate 4) ---------------------------------------------------------------
+# --- IMP-38: lineage (exit gate 4) ---------------------------------------------------------------
 
 
-def test_imp_21_r1_005_every_line_resolves_to_its_source_row_batch_and_file_hash(
+def test_imp_38_r1_005_every_line_resolves_to_its_source_row_batch_and_file_hash(
     app_engine: Engine, layout: UUID
 ) -> None:
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
@@ -209,7 +209,7 @@ def test_imp_21_r1_005_every_line_resolves_to_its_source_row_batch_and_file_hash
         assert row_number == item_no == int(raw_item)  # the exact row, not just the file
 
 
-def test_imp_21_r1_005_the_database_refuses_a_line_without_a_source_row(
+def test_imp_38_r1_005_the_database_refuses_a_line_without_a_source_row(
     app_engine: Engine, admin_engine: Engine, layout: UUID
 ) -> None:
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
@@ -227,10 +227,10 @@ select gen_random_uuid(), tenant_id, declaration_id, 99{extra}, 1, '7208100000',
 """
 
 
-# --- IMP-22: a changed source row is a new version ---------------------------------------------
+# --- IMP-39: a changed source row is a new version ---------------------------------------------
 
 
-def test_imp_22_r1_005_a_changed_row_makes_version_two_and_keeps_version_one(
+def test_imp_39_r1_005_a_changed_row_makes_version_two_and_keeps_version_one(
     app_engine: Engine, layout: UUID
 ) -> None:
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
@@ -273,7 +273,7 @@ def test_imp_22_r1_005_a_changed_row_makes_version_two_and_keeps_version_one(
     assert events["duplicates_seen"] == 4 and events["lines_superseded"] == 1
 
 
-def test_imp_22_r1_005_a_changed_declaration_makes_version_two_under_the_same_reference(
+def test_imp_39_r1_005_a_changed_declaration_makes_version_two_under_the_same_reference(
     app_engine: Engine, layout: UUID
 ) -> None:
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
@@ -297,7 +297,7 @@ def test_imp_22_r1_005_a_changed_declaration_makes_version_two_under_the_same_re
     assert lines == [(1, 1), (2, 2)]  # the new line version sits under the new declaration
 
 
-def test_imp_22_r1_005_conflicting_rows_in_one_file_are_exceptions_not_versions(
+def test_imp_39_r1_005_conflicting_rows_in_one_file_are_all_rejected_not_first_wins(
     app_engine: Engine, layout: UUID
 ) -> None:
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
@@ -305,23 +305,35 @@ def test_imp_22_r1_005_conflicting_rows_in_one_file_are_exceptions_not_versions(
     twin = list(rows[0])
     twin[VALUE] = "1.00"  # same MRN and item as row 1, different value
     clash = list(good_row(2))
-    clash[0] = rows[0][0]  # same MRN as row 1, another item, another acceptance date
-    clash[3] = "2"
+    clash[0] = rows[1][0]  # same MRN as row 2, another item, another acceptance date
+    clash[3] = "9"
     clash[DATE_COL] = "09/09/2027"
     batch = import_rows(app_engine, store, tenant, [*rows, twin, clash])
     assert exceptions(app_engine, tenant, batch) == {
+        (1, "line.item_no", "LINE_CONFLICT_IN_FILE"),  # BOTH rows of a key are rejected
         (4, "line.item_no", "LINE_CONFLICT_IN_FILE"),
+        (2, "declaration.mrn", "DECLARATION_FACTS_CONFLICT"),  # and both of a declaration
         (5, "declaration.mrn", "DECLARATION_FACTS_CONFLICT"),
     }
-    assert count(app_engine, tenant, "import_lines") == 3
+    assert [r[0] for r in q(app_engine, tenant, "select item_no from cbam.import_lines")] == [3]
     row = batch_row(app_engine, tenant, batch)
-    assert (row.status, row.rows_rejected, row.lines_created) == ("completed_with_errors", 2, 3)
+    assert (row.status, row.rows_rejected, row.lines_created) == ("completed_with_errors", 4, 1)
 
 
-# --- IMP-23 .. IMP-27 ------------------------------------------------------------------------------
+def test_imp_39_r1_005_identical_rows_in_one_file_are_not_a_conflict(
+    app_engine: Engine, layout: UUID
+) -> None:
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    batch = import_rows(app_engine, store, tenant, [*rows_for(range(1, 3)), good_row(1)])
+    assert exceptions(app_engine, tenant, batch) == set()
+    row = batch_row(app_engine, tenant, batch)
+    assert (row.lines_created, row.lines_unchanged) == (2, 1)
 
 
-def test_imp_23_r1_005_the_exact_code_and_six_decimal_mass_are_stored(
+# --- IMP-40 .. IMP-44 ------------------------------------------------------------------------------
+
+
+def test_imp_40_r1_005_the_exact_code_and_six_decimal_mass_are_stored(
     app_engine: Engine, layout: UUID
 ) -> None:
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
@@ -346,7 +358,7 @@ def test_imp_23_r1_005_the_exact_code_and_six_decimal_mass_are_stored(
     )  # six places, never rounded
 
 
-def test_imp_24_r1_010_normalised_facts_are_append_only_for_the_app_and_the_owner(
+def test_imp_41_r1_010_normalised_facts_are_append_only_for_the_app_and_the_owner(
     app_engine: Engine, admin_engine: Engine, layout: UUID
 ) -> None:
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
@@ -379,7 +391,7 @@ def test_imp_24_r1_010_normalised_facts_are_append_only_for_the_app_and_the_owne
         ("value_source", "'manual'"),
     ],
 )
-def test_imp_24_r1_010_value_fields_of_a_line_cannot_be_changed_in_place(
+def test_imp_41_r1_010_value_fields_of_a_line_cannot_be_changed_in_place(
     app_engine: Engine, admin_engine: Engine, layout: UUID, column: str, value: str
 ) -> None:
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
@@ -390,7 +402,7 @@ def test_imp_24_r1_010_value_fields_of_a_line_cannot_be_changed_in_place(
         s.execute(text(f"update cbam.import_lines set {column} = {value}"))
 
 
-def test_imp_24_r1_010_a_correction_needs_a_reason_and_a_valid_chain_even_from_the_owner(
+def test_imp_41_r1_010_a_correction_needs_a_reason_and_a_valid_chain_even_from_the_owner(
     app_engine: Engine, admin_engine: Engine, layout: UUID
 ) -> None:
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
@@ -419,7 +431,7 @@ def test_imp_24_r1_010_a_correction_needs_a_reason_and_a_valid_chain_even_from_t
     assert count(app_engine, tenant, "import_lines") == 3
 
 
-def test_imp_25_r1_005_no_normalised_table_has_a_tax_point_scope_quarter_or_threshold(
+def test_imp_42_r1_005_no_normalised_table_has_a_tax_point_scope_quarter_or_threshold(
     app_engine: Engine, layout: UUID
 ) -> None:
     columns = {
@@ -436,7 +448,7 @@ def test_imp_25_r1_005_no_normalised_table_has_a_tax_point_scope_quarter_or_thre
         assert not any(banned in c for c in columns), banned
 
 
-def test_imp_25_r1_005_the_acceptance_date_is_never_copied_into_a_tax_point(
+def test_imp_42_r1_005_the_acceptance_date_is_never_copied_into_a_tax_point(
     app_engine: Engine, layout: UUID
 ) -> None:
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
@@ -450,7 +462,7 @@ def test_imp_25_r1_005_the_acceptance_date_is_never_copied_into_a_tax_point(
     assert count(app_engine, tenant, "tasks") == 0
 
 
-def test_imp_26_r1_010_the_gbp_value_is_set_only_for_a_gbp_declaration(
+def test_imp_43_r1_010_the_gbp_value_is_set_only_for_a_gbp_declaration(
     app_engine: Engine, layout: UUID
 ) -> None:
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
@@ -473,7 +485,7 @@ def test_imp_26_r1_010_the_gbp_value_is_set_only_for_a_gbp_declaration(
     ]
 
 
-def test_imp_27_r1_025_rows_with_errors_never_normalise_and_warning_only_rows_do(
+def test_imp_44_r1_025_rows_with_errors_never_normalise_and_warning_only_rows_do(
     app_engine: Engine, layout: UUID
 ) -> None:
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
@@ -502,7 +514,7 @@ def test_imp_27_r1_025_rows_with_errors_never_normalise_and_warning_only_rows_do
     assert warned == [(2, 1), (4, 0)]
 
 
-def test_imp_27_r1_025_a_layout_missing_a_line_field_is_refused_before_any_row_is_read(
+def test_imp_44_r1_025_a_layout_missing_a_line_field_is_refused_before_any_row_is_read(
     app_engine: Engine, layout: UUID
 ) -> None:
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
@@ -514,10 +526,10 @@ def test_imp_27_r1_025_a_layout_missing_a_line_field_is_refused_before_any_row_i
     assert count(app_engine, tenant, "import_lines") == 0
 
 
-# --- IMP-28: the 500-row gate, end to end ------------------------------------------------------------
+# --- IMP-45: the 500-row gate, end to end ------------------------------------------------------------
 
 
-def test_imp_28_r1_025_the_500_row_file_with_37_bad_rows_makes_463_lines_and_37_exceptions(
+def test_imp_45_r1_025_the_500_row_file_with_37_bad_rows_makes_463_lines_and_37_exceptions(
     app_engine: Engine, layout: UUID
 ) -> None:
     """Phase 3 exit gate 1, end to end: valid rows become lines, bad rows are reported per row."""
@@ -552,7 +564,7 @@ def test_imp_28_r1_025_the_500_row_file_with_37_bad_rows_makes_463_lines_and_37_
         assert sentinel not in everything, sentinel
 
 
-def test_imp_28_r1_025_the_audit_event_of_a_chunk_has_counts_and_at_most_500_ids(
+def test_imp_45_r1_025_the_audit_event_of_a_chunk_has_counts_and_at_most_500_ids(
     app_engine: Engine, layout: UUID
 ) -> None:
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
@@ -573,10 +585,10 @@ def test_imp_28_r1_025_the_audit_event_of_a_chunk_has_counts_and_at_most_500_ids
     assert sum(e["lines_created"] for e in events) == 1200
 
 
-# --- IMP-29: tenant isolation --------------------------------------------------------------------------
+# --- IMP-46: tenant isolation --------------------------------------------------------------------------
 
 
-def test_imp_29_r1_005_tenant_b_sees_none_of_tenant_as_lines_declarations_parties_or_sources(
+def test_imp_46_r1_005_tenant_b_sees_none_of_tenant_as_lines_declarations_parties_or_sources(
     app_engine: Engine, layout: UUID
 ) -> None:
     a, b = make_tenant(app_engine, "A"), make_tenant(app_engine, "B")
@@ -600,7 +612,7 @@ def test_imp_29_r1_005_tenant_b_sees_none_of_tenant_as_lines_declarations_partie
         )
 
 
-def test_imp_29_r1_005_the_app_filters_by_tenant_even_when_row_level_security_is_off(
+def test_imp_46_r1_005_the_app_filters_by_tenant_even_when_row_level_security_is_off(
     app_engine: Engine, admin_engine: Engine, layout: UUID
 ) -> None:
     a, b = make_tenant(app_engine, "A"), make_tenant(app_engine, "B")
@@ -630,10 +642,10 @@ def test_imp_29_r1_005_the_app_filters_by_tenant_even_when_row_level_security_is
             outer.rollback()
 
 
-# --- IMP-32: the commodity-code impact provider ----------------------------------------------------------
+# --- IMP-49: the commodity-code impact provider ----------------------------------------------------------
 
 
-def test_imp_32_r1_005_the_impact_function_returns_counts_only_and_is_locked_down(
+def test_imp_49_r1_005_the_impact_function_returns_counts_only_and_is_locked_down(
     app_engine: Engine, admin_engine: Engine, layout: UUID
 ) -> None:
     a, b = make_tenant(app_engine, "A"), make_tenant(app_engine, "B")
@@ -651,15 +663,17 @@ def test_imp_32_r1_005_the_impact_function_returns_counts_only_and_is_locked_dow
         cur = s.execute(
             text("select * from cbam.impact_line_counts_by_code_prefix(array['7204','xx%','72'])")
         )
-        assert list(cur.keys()) == ["tenant_id", "line_count"]  # no id, no value
-        got = {r[0]: r[1] for r in cur}
-    assert got == {a: 3, b: 2}  # A: the superseded version is not counted; 'xx%' matches nothing
+        assert list(cur.keys()) == ["prefix", "tenant_id", "line_count"]  # no id, no value
+        got = {(r[0], r[1]): r[2] for r in cur}
+    # A: the superseded version is not counted; 'xx%' matches nothing
+    assert got == {("7204", a): 1, ("7204", b): 1, ("72", a): 3, ("72", b): 2}
     with tenant_session(app_engine, tenant_id=None, platform=True) as s:
-        assert dict(
-            s.execute(
+        assert {
+            (r[0], r[1]): r[2]
+            for r in s.execute(
                 text("select * from cbam.impact_line_counts_by_code_prefix(array['7204'])")
-            ).all()
-        ) == {a: 1, b: 1}
+            )
+        } == {("7204", a): 1, ("7204", b): 1}
         assert (
             s.execute(text("select * from cbam.impact_line_counts_by_code_prefix(array[''])")).all()
             == []
@@ -673,12 +687,40 @@ def test_imp_32_r1_005_the_impact_function_returns_counts_only_and_is_locked_dow
         " (select count(*) from pg_proc q2 where q2.proname = p.proname)"
         " from pg_proc p where p.proname = 'impact_line_counts_by_code_prefix'",
     )
-    assert meta == [(True, "cbam_owner", '{"search_path=cbam, pg_temp"}', True, False, 1)]
+    assert meta == [(True, "cbam_impact_reader", '{"search_path=cbam, pg_temp"}', True, False, 1)]
+    # the function refuses a tenant session and an oversized list; it is for platform mode only
+    with pytest.raises(DBAPIError, match="platform"):
+        q(app_engine, a, "select * from cbam.impact_line_counts_by_code_prefix(array['72'])")
+    with (
+        pytest.raises(DBAPIError, match="at most 1000"),
+        tenant_session(app_engine, tenant_id=None, platform=True) as s,
+    ):
+        s.execute(
+            text(
+                "select * from cbam.impact_line_counts_by_code_prefix(array_fill('72'::text, array[1001]))"
+            )
+        )
+    with tenant_session(app_engine, tenant_id=None, platform=True) as s:  # 1000 is still fine
+        assert (
+            s.execute(
+                text(
+                    "select count(*) from cbam.impact_line_counts_by_code_prefix(array_fill('7204'::text, array[1000]))"
+                )
+            ).scalar_one()
+            == 2
+        )
+    # neither the table owner nor the app role has a cross-tenant policy on the lines
+    assert q(
+        app_engine,
+        a,
+        "select count(*) from pg_policies where tablename = 'import_lines'"
+        " and ('cbam_owner' = any(roles) or 'cbam_app' = any(roles))",
+    ) == [(0,)]
     # a table read is still tenant-isolated for the app role: only the function crosses tenants
     assert count(app_engine, b, "import_lines") == 2
 
 
-def test_imp_32_r1_005_the_phase_2_report_shows_counts_per_tenant_for_a_changed_prefix(
+def test_imp_49_r1_005_the_phase_2_report_shows_counts_per_tenant_for_a_changed_prefix(
     app_engine: Engine, admin_engine: Engine, layout: UUID, tmp_path: object
 ) -> None:
     a, b = make_tenant(app_engine, "A"), make_tenant(app_engine, "B")
@@ -709,15 +751,17 @@ def test_imp_32_r1_005_the_phase_2_report_shows_counts_per_tenant_for_a_changed_
         "kind": "import_lines",
         "ref": str(a),
         "detail": "2 current line(s) under 7204",
+        "group": "7204",
+        "count": 2,
     }
     assert items[str(b)]["detail"] == "1 current line(s) under 7204"
     assert isinstance(refdata_rules.VersionDiff, type)
 
 
-# --- IMP-33: API -------------------------------------------------------------------------------------------
+# --- IMP-50: API -------------------------------------------------------------------------------------------
 
 
-def test_imp_33_r1_005_the_line_detail_shows_every_source_row_the_batch_and_the_file(
+def test_imp_50_r1_005_the_line_detail_shows_every_source_row_the_batch_and_the_file(
     client: TestClient, app_engine: Engine, store: InMemoryStore, layout: UUID
 ) -> None:
     tenant = make_tenant(app_engine, "A")
@@ -758,7 +802,7 @@ def test_imp_33_r1_005_the_line_detail_shows_every_source_row_the_batch_and_the_
     assert decl.status_code == 200 and decl.json()["mrn"] == "MRN-SENTINEL-0002"
 
 
-def test_imp_33_r1_005_list_filters_and_pagination(
+def test_imp_50_r1_005_list_filters_and_pagination(
     client: TestClient, app_engine: Engine, store: InMemoryStore, layout: UUID
 ) -> None:
     tenant = make_tenant(app_engine, "A")
@@ -800,7 +844,7 @@ def test_imp_33_r1_005_list_filters_and_pagination(
         assert client.get(f"{base}?{bad}", headers=headers).status_code in (400, 422), bad
 
 
-def test_imp_33_r1_005_permissions_and_tenancy_of_the_ledger_routes(
+def test_imp_50_r1_005_permissions_and_tenancy_of_the_ledger_routes(
     client: TestClient, app_engine: Engine, store: InMemoryStore, layout: UUID
 ) -> None:
     a, b = make_tenant(app_engine, "A"), make_tenant(app_engine, "B")
@@ -825,7 +869,7 @@ def test_imp_33_r1_005_permissions_and_tenancy_of_the_ledger_routes(
     assert url(a, line[0])  # the batch URL helper stays importable for the module
 
 
-def test_imp_33_r1_005_nothing_the_api_returns_for_a_line_is_a_float() -> None:
+def test_imp_50_r1_005_nothing_the_api_returns_for_a_line_is_a_float() -> None:
     from app.modules.imports.schemas import ImportLineOut
 
     for name, field in ImportLineOut.model_fields.items():

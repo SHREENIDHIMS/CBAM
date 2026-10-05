@@ -126,9 +126,11 @@ class ImportLineOut(BaseModel):
     (CLAUDE.md rule 3). `acceptance_date` is the date the report gave, NOT a tax point."""
 
     id: UUID
-    declaration_id: UUID
+    declaration_id: UUID  # the version the line was created under
     mrn: str
-    acceptance_date: date
+    current_declaration_id: UUID
+    declaration_superseded: bool  # true when `declaration_id` is no longer the current version
+    acceptance_date: date  # of the CURRENT declaration version, as reported (not a tax point)
     item_no: int
     version: int
     supersedes_id: UUID | None

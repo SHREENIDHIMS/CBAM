@@ -145,6 +145,7 @@ declarations = Table(
     Column("entry_method", Text, nullable=False),
     Column("batch_id", Uuid, nullable=False),
     Column("content_sha256", Text, nullable=False),
+    Column("hash_version", Integer, nullable=False),
     Column("created_at", DateTime(timezone=True)),
 )
 
@@ -177,6 +178,7 @@ import_lines = Table(
     Column("entry_method", Text, nullable=False),
     Column("change_reason", Text),
     Column("content_sha256", Text, nullable=False),
+    Column("hash_version", Integer, nullable=False),
     Column("created_at", DateTime(timezone=True)),
 )
 

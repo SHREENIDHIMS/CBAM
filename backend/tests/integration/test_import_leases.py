@@ -1,8 +1,8 @@
 # ruff: noqa: F811 - imported pytest fixtures are used as test arguments
 """R1-025 / R1-003 job lease hardening: owner token, back-off release, time-based renewal.
 
-Scenario IDs: IMP-34 only the lease owner renews or releases, IMP-35 a handled failure holds the
-lease until the retry is due and does not burn an attempt, IMP-36 renewal while skipping rows.
+Scenario IDs: IMP-51 only the lease owner renews or releases, IMP-52 a handled failure holds the
+lease until the retry is due and does not burn an attempt, IMP-53 renewal while skipping rows.
 Product rules, not law. Fixtures are synthetic.
 """
 
@@ -47,7 +47,7 @@ def steal(engine: Engine, tenant: UUID, batch: UUID, token: UUID) -> None:
         )
 
 
-def test_imp_34_r1_003_a_lease_takeover_writes_a_token_and_a_failure_clears_it(
+def test_imp_51_r1_003_a_lease_takeover_writes_a_token_and_a_failure_clears_it(
     app_engine: Engine, layout: UUID
 ) -> None:
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
@@ -67,7 +67,7 @@ def test_imp_34_r1_003_a_lease_takeover_writes_a_token_and_a_failure_clears_it(
     assert (released.attempts, released.lease_expires_at) == (2, at(10).now())
 
 
-def test_imp_34_r1_003_a_job_that_lost_its_lease_stops_and_leaves_the_batch_alone(
+def test_imp_51_r1_003_a_job_that_lost_its_lease_stops_and_leaves_the_batch_alone(
     app_engine: Engine, layout: UUID
 ) -> None:
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
@@ -84,7 +84,7 @@ def test_imp_34_r1_003_a_job_that_lost_its_lease_stops_and_leaves_the_batch_alon
     assert row.lease_expires_at == NOW + timedelta(seconds=300)  # nor a renewal of its lease
 
 
-def test_imp_34_r1_003_chunk_renew_and_release_act_only_for_the_token_holder(
+def test_imp_51_r1_003_chunk_renew_and_release_act_only_for_the_token_holder(
     app_engine: Engine, layout: UUID
 ) -> None:
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
@@ -111,7 +111,7 @@ def test_imp_34_r1_003_chunk_renew_and_release_act_only_for_the_token_holder(
     assert after.rows_total == before.rows_total  # the stale chunk wrote nothing
 
 
-def test_imp_34_r1_003_a_run_that_never_took_the_lease_does_not_release_one(
+def test_imp_51_r1_003_a_run_that_never_took_the_lease_does_not_release_one(
     app_engine: Engine, layout: UUID, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
@@ -128,7 +128,7 @@ def test_imp_34_r1_003_a_run_that_never_took_the_lease_does_not_release_one(
     assert calls == []
 
 
-def test_imp_35_r1_003_a_failed_run_holds_the_lease_until_the_retry_is_due(
+def test_imp_52_r1_003_a_failed_run_holds_the_lease_until_the_retry_is_due(
     app_engine: Engine, layout: UUID
 ) -> None:
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
@@ -143,7 +143,10 @@ def test_imp_35_r1_003_a_failed_run_holds_the_lease_until_the_retry_is_due(
             chunk_rows=2, after_chunk=boom, release_delay_seconds=60,
         )  # fmt: skip
     row = batch_row(app_engine, tenant, batch.id)
-    assert (row.lease_owner, row.lease_expires_at) == (None, NOW + timedelta(seconds=60))
+    assert (row.lease_owner, row.lease_expires_at) == (
+        None,
+        NOW + timedelta(seconds=65),
+    )  # back-off plus the 5 s margin
     # the sweeper and an early duplicate leave it alone until the back-off has passed
     assert (tenant, batch.id) not in sweep(app_engine, at(0.5))
     assert run(app_engine, store, tenant, batch.id, clock=at(0.5), chunk_rows=2) == "validating"
@@ -153,13 +156,13 @@ def test_imp_35_r1_003_a_failed_run_holds_the_lease_until_the_retry_is_due(
     assert batch_row(app_engine, tenant, batch.id).attempts == 1
 
 
-def test_imp_35_r1_003_the_task_passes_its_retry_countdown_as_the_release_delay() -> None:
+def test_imp_52_r1_003_the_task_passes_its_retry_countdown_as_the_release_delay() -> None:
     assert [jobs.retry_countdown(n) for n in range(8)] == [10, 20, 40, 80, 160, 320, 600, 600]
     source = inspect.getsource(jobs.process_batch_task)
     assert "release_delay_seconds=countdown" in source
 
 
-def test_imp_35_r1_003_a_lost_worker_still_counts_an_attempt_for_the_crash_loop_guard(
+def test_imp_52_r1_003_a_lost_worker_still_counts_an_attempt_for_the_crash_loop_guard(
     app_engine: Engine, layout: UUID
 ) -> None:
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
@@ -190,7 +193,7 @@ class TickClock(FrozenClock):
         return super().now()
 
 
-def test_imp_36_r1_003_the_lease_is_renewed_on_a_time_basis_while_skipping_saved_rows(
+def test_imp_53_r1_003_the_lease_is_renewed_on_a_time_basis_while_skipping_saved_rows(
     app_engine: Engine, layout: UUID, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
@@ -215,7 +218,7 @@ def test_imp_36_r1_003_the_lease_is_renewed_on_a_time_basis_while_skipping_saved
     assert batch_row(app_engine, tenant, batch.id).attempts == 2
 
 
-def test_imp_36_r1_003_a_frozen_clock_does_not_renew_over_and_over(
+def test_imp_53_r1_003_a_frozen_clock_does_not_renew_over_and_over(
     app_engine: Engine, layout: UUID, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
@@ -233,7 +236,7 @@ def test_imp_36_r1_003_a_frozen_clock_does_not_renew_over_and_over(
     assert len(renewals) == 1  # only the forced one after the header and layout steps
 
 
-def test_imp_36_r1_003_the_lease_length_always_comes_from_the_import_limits() -> None:
+def test_imp_53_r1_003_the_lease_length_always_comes_from_the_import_limits() -> None:
     default = inspect.signature(processing._chunk).parameters["lease_seconds"].default
     assert default is inspect.Parameter.empty  # no hard-coded 300 any more
     assert "= 300" not in inspect.getsource(processing)

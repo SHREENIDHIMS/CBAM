@@ -8,37 +8,46 @@ lists this as the first cross-tenant code path).
 """
 
 from collections.abc import Sequence
+from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import Row, text
 from sqlalchemy.orm import Session
 
 from app.modules.refdata import rules as refdata_rules
 from app.modules.refdata import service as refdata
 
 DATASET = "cbam_commodity_codes"
+MAX_PREFIXES_PER_CALL = 1000  # the database function refuses more
 
 
 def line_impact(
     session: Session, diff: refdata_rules.VersionDiff
 ) -> Sequence[refdata.AffectedItem]:
+    """One call per 1000 changed prefixes (the function refuses more). The function is for
+    platform mode, which the caller's session already is."""
     prefixes = sorted({str(c.key["code_prefix"]) for c in diff.changes})
-    items: list[refdata.AffectedItem] = []
-    for prefix in prefixes:
-        rows = session.execute(
+    if not prefixes:
+        return []
+    rows: list[Row[Any]] = []
+    for start in range(0, len(prefixes), MAX_PREFIXES_PER_CALL):
+        rows += session.execute(
             text(
-                "select tenant_id, line_count"
+                "select prefix, tenant_id, line_count"
                 " from cbam.impact_line_counts_by_code_prefix(cast(:p as text[]))"
-                " order by tenant_id"
+                " order by prefix, tenant_id"
             ),
-            {"p": [prefix]},
+            {"p": prefixes[start : start + MAX_PREFIXES_PER_CALL]},
         ).all()
-        items.extend(
-            refdata.AffectedItem(
-                "import_lines", str(r.tenant_id), f"{r.line_count} current line(s) under {prefix}"
-            )
-            for r in rows
+    return [
+        refdata.AffectedItem(
+            "import_lines",
+            str(r.tenant_id),
+            f"{r.line_count} current line(s) under {r.prefix}",
+            group=r.prefix,
+            count=int(r.line_count),
         )
-    return items
+        for r in rows
+    ]
 
 
 def register() -> None:

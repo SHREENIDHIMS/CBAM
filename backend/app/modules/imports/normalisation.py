@@ -11,6 +11,12 @@ files that overlap cannot both create the same declaration or line. For every ro
 - changed: a new version that supersedes the old one (the old one is kept), `source_changed`;
 - conflict (two different versions of one key inside one file): a row exception, no line.
 
+Stale or hand-made data never replaces newer facts: a row that equals ANY earlier version is
+only a sighting, a current version that was corrected or keyed by hand is never superseded by a
+file, and a report older than the one the current version came from is left for a human
+(`rules.reconcile_version`). Before the chunks, a pre-pass finds rows of one file that give the
+same key with different facts and rejects ALL of them (no first-wins).
+
 A row is done once it has a source link or an error exception, so a crashed run resumes by
 asking for the rows that have neither. The audit event of a chunk holds counts and ids only;
 never a cell value, an MRN, an EORI or a name. Nothing here decides scope, tax point, quarter,
@@ -19,7 +25,7 @@ threshold or the liable person (Phases 4 to 6): the party roles are stored as re
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
@@ -50,11 +56,35 @@ class SourceRow:
 
 
 @dataclass(frozen=True)
-class _Current:
+class _Version:
     id: UUID
     version: int
     content_sha256: str
     batch_id: UUID
+    entry_method: str
+    value_source: str
+    recency: date
+
+
+@dataclass
+class _Chain:
+    """Every version of one key, oldest first; the last is the current one."""
+
+    versions: list[_Version]
+
+    @property
+    def current(self) -> _Version:
+        return self.versions[-1]
+
+    def by_hash(self) -> dict[str, UUID]:
+        return {v.content_sha256: v.id for v in self.versions}
+
+
+# The recency of a version is the date of the report that produced it: the date it was acquired,
+# else the end of its window, else the date it was received (UK date).
+_RECENCY = (
+    "coalesce(b.acquired_on, b.window_end, (b.created_at at time zone 'Europe/London')::date)"
+)
 
 
 @dataclass
@@ -71,22 +101,87 @@ class ChunkOutcome:
     superseded: list[tuple[UUID, UUID]] = field(default_factory=list)
 
 
-def pending_rows(session: Session, tenant_id: UUID, batch_id: UUID, limit: int) -> list[SourceRow]:
-    """Rows of the batch with no error exception and no source link yet, in row order."""
+_FILE_CONFLICT_CODES = "('LINE_CONFLICT_IN_FILE','DECLARATION_FACTS_CONFLICT')"
+
+
+def pending_rows(
+    session: Session,
+    tenant_id: UUID,
+    batch_id: UUID,
+    limit: int,
+    *,
+    after: int = 0,
+    for_conflict_scan: bool = False,
+) -> list[SourceRow]:
+    """Rows of the batch with no source link yet, in row order. Normally also without an error
+    exception; the conflict scan keeps rows whose only errors are file conflicts, so a rerun
+    finds the same conflicts."""
+    codes = f" and e.code not in {_FILE_CONFLICT_CODES}" if for_conflict_scan else ""
     rows = session.execute(
         text(
-            "select sr.id, sr.row_number, sr.raw from cbam.source_rows sr"
-            " where sr.tenant_id = :t and sr.batch_id = :b"
+            "select sr.id, sr.row_number, sr.raw from cbam.source_rows sr"  # noqa: S608
+            " where sr.tenant_id = :t and sr.batch_id = :b and sr.row_number > :after"
             " and not exists (select 1 from cbam.row_exceptions e"
             "   where e.tenant_id = sr.tenant_id and e.batch_id = sr.batch_id"
-            "   and e.row_number = sr.row_number and e.severity = 'error')"
+            f"   and e.row_number = sr.row_number and e.severity = 'error'{codes})"
             " and not exists (select 1 from cbam.import_line_sources s"
             "   where s.tenant_id = sr.tenant_id and s.source_row_id = sr.id)"
             " order by sr.row_number limit :n"
         ),
-        {"t": tenant_id, "b": batch_id, "n": limit},
+        {"t": tenant_id, "b": batch_id, "n": limit, "after": after},
     ).all()
     return [SourceRow(r.id, int(r.row_number), dict(r.raw)) for r in rows]
+
+
+def find_file_conflicts(
+    session: Session,
+    tenant_id: UUID,
+    batch_id: UUID,
+    match: rules.LayoutMatch,
+    ctx: rules.NormalisationContext,
+    *,
+    page: int = 500,
+) -> list[tuple[int, UUID | None, rules.Issue]]:
+    """Rows of ONE file that give the same line key with different facts, or the same MRN with
+    different declaration facts. Every row involved is rejected (a data error in the file: there
+    is no way to know which row is right), never first-wins."""
+    rows: list[tuple[int, UUID, str, int, str, str]] = []
+    after = 0
+    while True:
+        batch = pending_rows(
+            session, tenant_id, batch_id, page, after=after, for_conflict_scan=True
+        )
+        if not batch:
+            break
+        after = batch[-1].number
+        for src in batch:
+            line = rules.normalise_row(rules.map_row(src.raw, match), ctx).line
+            if line is not None:
+                decl = line.declaration
+                rows.append(
+                    (
+                        src.number,
+                        src.id,
+                        decl.mrn,
+                        line.item_no,
+                        line.content_sha256,
+                        decl.content_sha256,
+                    )
+                )
+    decl_hashes: dict[str, set[str]] = {}
+    line_hashes: dict[tuple[str, int], set[str]] = {}
+    for _, _, mrn, item, line_hash, decl_hash in rows:
+        decl_hashes.setdefault(mrn, set()).add(decl_hash)
+        line_hashes.setdefault((mrn, item), set()).add(line_hash)
+    found: list[tuple[int, UUID | None, rules.Issue]] = []
+    for number, source_id, mrn, item, _, _ in rows:
+        if len(decl_hashes[mrn]) > 1:
+            found.append(
+                (number, source_id, rules.Issue("DECLARATION_FACTS_CONFLICT", "declaration.mrn"))
+            )
+        elif len(line_hashes[(mrn, item)]) > 1:
+            found.append((number, source_id, rules.Issue("LINE_CONFLICT_IN_FILE", "line.item_no")))
+    return found
 
 
 def _lock_mrns(session: Session, tenant_id: UUID, mrns: list[str]) -> None:
@@ -122,39 +217,64 @@ def _upsert_parties(
     return {r.eori: r.id for r in found}
 
 
-def _current_declarations(
-    session: Session, tenant_id: UUID, mrns: list[str]
-) -> dict[str, _Current]:
+def _declaration_chains(session: Session, tenant_id: UUID, mrns: list[str]) -> dict[str, _Chain]:
     rows = session.execute(
         text(
-            "select d.id, d.mrn, d.version, d.content_sha256, d.batch_id from cbam.declarations d"
-            " where d.tenant_id = :t and d.mrn = any(:m)"
-            " and not exists (select 1 from cbam.declarations n"
-            "   where n.tenant_id = d.tenant_id and n.supersedes_id = d.id)"
+            "select d.id, d.mrn, d.version, d.content_sha256, d.batch_id, d.entry_method,"  # noqa: S608
+            f" 'declared' as value_source, {_RECENCY} as recency"
+            " from cbam.declarations d join cbam.import_batches b"
+            "   on b.tenant_id = d.tenant_id and b.id = d.batch_id"
+            " where d.tenant_id = :t and d.mrn = any(:m) order by d.mrn, d.version"
         ),
         {"t": tenant_id, "m": mrns},
     ).all()
-    return {r.mrn: _Current(r.id, r.version, r.content_sha256, r.batch_id) for r in rows}
+    chains: dict[str, _Chain] = {}
+    for r in rows:
+        v = _Version(
+            r.id, r.version, r.content_sha256, r.batch_id, r.entry_method, r.value_source, r.recency
+        )
+        chains.setdefault(r.mrn, _Chain([])).versions.append(v)
+    return chains
 
 
-def _current_lines(
+def _line_chains(
     session: Session, tenant_id: UUID, mrns: list[str]
-) -> dict[tuple[str, int], _Current]:
+) -> dict[tuple[str, int], _Chain]:
     rows = session.execute(
         text(
-            "select l.id, l.item_no, l.version, l.content_sha256, l.batch_id, d.mrn"
+            "select l.id, l.item_no, l.version, l.content_sha256, l.batch_id, l.entry_method,"  # noqa: S608
+            f" l.value_source, d.mrn, {_RECENCY} as recency"
             " from cbam.import_lines l join cbam.declarations d"
             "   on d.tenant_id = l.tenant_id and d.id = l.declaration_id"
-            " where l.tenant_id = :t and d.mrn = any(:m)"
-            " and not exists (select 1 from cbam.import_lines n"
-            "   where n.tenant_id = l.tenant_id and n.supersedes_id = l.id)"
+            " join cbam.import_batches b on b.tenant_id = l.tenant_id and b.id = l.batch_id"
+            " where l.tenant_id = :t and d.mrn = any(:m) order by d.mrn, l.item_no, l.version"
         ),
         {"t": tenant_id, "m": mrns},
     ).all()
-    return {
-        (r.mrn, int(r.item_no)): _Current(r.id, r.version, r.content_sha256, r.batch_id)
-        for r in rows
-    }
+    chains: dict[tuple[str, int], _Chain] = {}
+    for r in rows:
+        v = _Version(
+            r.id, r.version, r.content_sha256, r.batch_id, r.entry_method, r.value_source, r.recency
+        )
+        chains.setdefault((r.mrn, int(r.item_no)), _Chain([])).versions.append(v)
+    return chains
+
+
+def _decide(chain: _Chain | None, incoming_hash: str, batch_id: UUID, recency: date) -> str:
+    cur = chain.current if chain else None
+    return rules.reconcile_version(
+        current_hash=cur.content_sha256 if cur else None,
+        current_entry_method=cur.entry_method if cur else None,
+        current_value_source=cur.value_source if cur else None,
+        current_batch_id=cur.batch_id if cur else None,
+        current_recency=cur.recency if cur else None,
+        earlier_hashes=frozenset(v.content_sha256 for v in chain.versions[:-1])
+        if chain
+        else frozenset(),
+        incoming_hash=incoming_hash,
+        incoming_batch_id=batch_id,
+        incoming_recency=recency,
+    )
 
 
 def normalise_chunk(
@@ -166,10 +286,12 @@ def normalise_chunk(
     rows: list[SourceRow],
     match: rules.LayoutMatch,
     ctx: rules.NormalisationContext,
+    recency: date,
     now: datetime,
     add_exceptions: ExceptionSink,
 ) -> ChunkOutcome:
-    """Normalise one chunk inside the caller's transaction and write its audit event."""
+    """Normalise one chunk inside the caller's transaction and write its audit event.
+    `recency` is the date of this batch's report (see `_RECENCY`)."""
     out = ChunkOutcome(rows=len(rows))
     rejected: list[tuple[int, UUID | None, rules.Issue]] = []
     groups: dict[str, list[tuple[SourceRow, rules.NormalisedLine]]] = {}
@@ -181,8 +303,8 @@ def normalise_chunk(
             groups.setdefault(result.line.declaration.mrn, []).append((src, result.line))
     mrns = sorted(groups)
     _lock_mrns(session, tenant_id, mrns)
-    current_decl = _current_declarations(session, tenant_id, mrns)
-    current_line = _current_lines(session, tenant_id, mrns)
+    decl_chains = _declaration_chains(session, tenant_id, mrns)
+    line_chains = _line_chains(session, tenant_id, mrns)
     party_ids = _upsert_parties(
         session,
         tenant_id,
@@ -206,30 +328,28 @@ def normalise_chunk(
     for mrn in mrns:
         for src, line in groups[mrn]:
             decl = line.declaration
-            existing = current_decl.get(mrn)
-            action = rules.reconcile(
-                existing.content_sha256 if existing else None,
-                decl.content_sha256,
-                same_batch=existing is not None and existing.batch_id == batch_id,
-            )
-            if action == "conflict":
-                rejected.append(
-                    (
-                        src.number,
-                        src.id,
-                        rules.Issue("DECLARATION_FACTS_CONFLICT", "declaration.mrn"),
-                    )
-                )
+            chain = decl_chains.get(mrn)
+            action = _decide(chain, decl.content_sha256, batch_id, recency)
+            if action in _DECLARATION_BLOCKED:
+                rejected.append((src.number, src.id, _blocked_issue(action, "declaration.mrn")))
+                continue
+            key = (mrn, line.item_no)
+            lchain = line_chains.get(key)
+            line_action = _decide(lchain, line.content_sha256, batch_id, recency)
+            if line_action in _LINE_BLOCKED:
+                rejected.append((src.number, src.id, _blocked_issue(line_action, "line.item_no")))
                 continue
             if action in ("new", "changed"):
+                previous = chain.current if chain else None
                 decl_id = uuid7()
+                version = 1 if previous is None else previous.version + 1
                 decl_rows.append(
                     {
                         "id": decl_id,
                         "tenant_id": tenant_id,
                         "mrn": mrn,
-                        "version": 1 if existing is None else existing.version + 1,
-                        "supersedes_id": None if existing is None else existing.id,
+                        "version": version,
+                        "supersedes_id": None if previous is None else previous.id,
                         "acceptance_date": decl.acceptance_date,
                         "importer_party_id": party_ids.get(decl.importer_eori or ""),
                         "declarant_party_id": party_ids.get(decl.declarant_eori or ""),
@@ -239,51 +359,53 @@ def normalise_chunk(
                         "entry_method": ctx.entry_method,
                         "batch_id": batch_id,
                         "content_sha256": decl.content_sha256,
+                        "hash_version": rules.HASH_VERSION,
                         "created_at": now,
                     }
                 )
                 out.declaration_ids.append(decl_id)
-                if existing is None:
+                if previous is None:
                     out.declarations_created += 1
                 else:
                     out.declarations_superseded += 1
-                existing = _Current(
+                entry = _Version(
                     decl_id,
-                    1 if existing is None else existing.version + 1,
+                    version,
                     decl.content_sha256,
                     batch_id,
+                    ctx.entry_method,
+                    "declared",
+                    recency,
                 )
-                current_decl[mrn] = existing
-            if existing is None:  # unreachable: 'new' and 'changed' both set it
+                chain = decl_chains.setdefault(mrn, _Chain([]))
+                chain.versions.append(entry)
+            if chain is None:  # unreachable: 'new' and 'changed' both create the chain
                 continue
-            key = (mrn, line.item_no)
-            previous = current_line.get(key)
-            line_action = rules.reconcile(
-                previous.content_sha256 if previous else None,
-                line.content_sha256,
-                same_batch=previous is not None and previous.batch_id == batch_id,
-            )
-            if line_action == "conflict":
-                rejected.append(
-                    (src.number, src.id, rules.Issue("LINE_CONFLICT_IN_FILE", "line.item_no"))
+            # 'same' and 'seen_earlier' keep the CURRENT declaration; a stale header never
+            # replaces a newer one.
+            current_decl = chain.current
+            if line_action in ("same", "seen_earlier") and lchain is not None:
+                target = (
+                    lchain.current.id
+                    if line_action == "same"
+                    else lchain.by_hash()[line.content_sha256]
                 )
-                continue
-            if line_action == "same" and previous is not None:
                 out.duplicates_seen += 1
                 source_rows.append(
-                    _source(tenant_id, previous.id, src.id, report_type, "duplicate_seen", now)
+                    _source(tenant_id, target, src.id, report_type, "duplicate_seen", now)
                 )
                 continue
+            previous_line = lchain.current if lchain else None
             line_id = uuid7()
-            version = 1 if previous is None else previous.version + 1
+            version = 1 if previous_line is None else previous_line.version + 1
             line_rows.append(
                 {
                     "id": line_id,
                     "tenant_id": tenant_id,
-                    "declaration_id": existing.id,
+                    "declaration_id": current_decl.id,
                     "item_no": line.item_no,
                     "version": version,
-                    "supersedes_id": None if previous is None else previous.id,
+                    "supersedes_id": None if previous_line is None else previous_line.id,
                     "commodity_code": line.commodity_code,
                     "description": line.description,
                     "net_mass_kg": line.net_mass_kg,
@@ -298,19 +420,30 @@ def normalise_chunk(
                     "batch_id": batch_id,
                     "source_row_id": src.id,
                     "entry_method": ctx.entry_method,
-                    "change_reason": None if previous is None else rules.REASON_SOURCE_CHANGED,
+                    "change_reason": None if previous_line is None else rules.REASON_SOURCE_CHANGED,
                     "content_sha256": line.content_sha256,
+                    "hash_version": rules.HASH_VERSION,
                     "created_at": now,
                 }
             )
             source_rows.append(_source(tenant_id, line_id, src.id, report_type, "primary", now))
             out.line_ids.append(line_id)
-            if previous is None:
+            if previous_line is None:
                 out.lines_created += 1
             else:
                 out.lines_superseded += 1
-                out.superseded.append((previous.id, line_id))
-            current_line[key] = _Current(line_id, version, line.content_sha256, batch_id)
+                out.superseded.append((previous_line.id, line_id))
+            line_chains.setdefault(key, _Chain([])).versions.append(
+                _Version(
+                    line_id,
+                    version,
+                    line.content_sha256,
+                    batch_id,
+                    ctx.entry_method,
+                    line.value_source,
+                    recency,
+                )
+            )
 
     if decl_rows:
         session.execute(insert(declarations), decl_rows)
@@ -323,6 +456,21 @@ def normalise_chunk(
     out.rows_rejected = len({n for n, _, _ in rejected})
     _audit(session, tenant_id, batch_id, rows, out, now)
     return out
+
+
+_DECLARATION_BLOCKED = frozenset({"conflict", "blocked_by_correction", "older_extract"})
+_LINE_BLOCKED = _DECLARATION_BLOCKED
+
+
+def _blocked_issue(action: str, field: str) -> rules.Issue:
+    if action == "blocked_by_correction":
+        return rules.Issue("SOURCE_CONFLICTS_WITH_CORRECTION", field)
+    if action == "older_extract":
+        return rules.Issue("OLDER_EXTRACT_CONFLICT", field)
+    return rules.Issue(
+        "DECLARATION_FACTS_CONFLICT" if field == "declaration.mrn" else "LINE_CONFLICT_IN_FILE",
+        field,
+    )
 
 
 def _source(

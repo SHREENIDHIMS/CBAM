@@ -33,7 +33,9 @@ _CODE_PREFIX = re.compile(r"^[0-9]{1,10}$")
 _ORIGIN = re.compile(r"^[A-Z]{2}$")
 
 _LINE_SELECT = """
-select l.id, l.declaration_id, d.mrn, d.acceptance_date, l.item_no, l.version, l.supersedes_id,
+select l.id, l.declaration_id, d.mrn, cd.id as current_declaration_id,
+  (cd.id <> d.id) as declaration_superseded, cd.acceptance_date, l.item_no, l.version,
+  l.supersedes_id,
   not exists (select 1 from cbam.import_lines n
                where n.tenant_id = l.tenant_id and n.supersedes_id = l.id) as is_current,
   l.commodity_code, l.description, l.net_mass_kg, l.customs_value_source,
@@ -46,7 +48,15 @@ select l.id, l.declaration_id, d.mrn, d.acceptance_date, l.item_no, l.version, l
     where s.tenant_id = l.tenant_id and s.import_line_id = l.id) as open_exceptions
 from cbam.import_lines l
 join cbam.declarations d on d.tenant_id = l.tenant_id and d.id = l.declaration_id
+join cbam.declarations cd on cd.tenant_id = d.tenant_id and cd.mrn = d.mrn
+  and not exists (select 1 from cbam.declarations n
+                   where n.tenant_id = cd.tenant_id and n.supersedes_id = cd.id)
 """
+# A line keeps the declaration version it was created under (`declaration_id`); the declaration
+# facts shown with it (acceptance date, parties, representation) are always those of the CURRENT
+# declaration version for its MRN, and `declaration_superseded` says when they differ. Anything
+# that needs declaration facts (Phase 4 tax point) must resolve the current declaration by MRN
+# the same way and never read `declaration_id` directly.
 
 
 def _line_out(row: Row[Any]) -> ImportLineOut:
@@ -83,10 +93,10 @@ def list_lines(
         where.append("l.country_of_origin_declared = :origin")
         params["origin"] = origin
     if date_from is not None:
-        where.append("d.acceptance_date >= :date_from")
+        where.append("cd.acceptance_date >= :date_from")
         params["date_from"] = date_from
     if date_to is not None:
-        where.append("d.acceptance_date <= :date_to")
+        where.append("cd.acceptance_date <= :date_to")
         params["date_to"] = date_to
     if batch_id is not None:
         where.append("l.batch_id = :batch")
@@ -128,6 +138,21 @@ def _party(session: Session, tenant_id: UUID, party_id: UUID | None) -> PartyOut
         {"t": tenant_id, "i": party_id},
     ).one_or_none()
     return None if row is None else PartyOut(id=row.id, eori=row.eori, name=row.name)
+
+
+def current_declaration(session: Session, tenant_id: UUID, mrn: str) -> DeclarationOut:
+    """The CURRENT version of the declaration with this MRN (the one nothing supersedes)."""
+    found = session.execute(
+        text(
+            "select d.id from cbam.declarations d where d.tenant_id = :t and d.mrn = :m"
+            " and not exists (select 1 from cbam.declarations n"
+            "   where n.tenant_id = d.tenant_id and n.supersedes_id = d.id)"
+        ),
+        {"t": tenant_id, "m": mrn},
+    ).scalar_one_or_none()
+    if found is None:
+        raise TenantMismatchError()
+    return get_declaration(session, tenant_id, found)
 
 
 def get_declaration(session: Session, tenant_id: UUID, declaration_id: UUID) -> DeclarationOut:
@@ -217,7 +242,7 @@ def get_line(session: Session, tenant_id: UUID, line_id: UUID) -> ImportLineDeta
     ).all()
     return ImportLineDetail(
         line=line,
-        declaration=get_declaration(session, tenant_id, line.declaration_id),
+        declaration=current_declaration(session, tenant_id, line.mrn),
         sources=[SourceRowOut(**dict(r._mapping)) for r in sources],
         batch=LineBatchOut(
             id=batch.id,

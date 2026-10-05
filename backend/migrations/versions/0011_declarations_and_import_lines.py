@@ -15,9 +15,11 @@ is GBP (no FX here: R1-035 is Phase 10). `value_source` records how the value wa
 (R1-010); anything other than `declared` must carry a `value_override_reason`.
 
 `cbam.impact_line_counts_by_code_prefix` is the platform's first cross-tenant code path: a
-SECURITY DEFINER function that returns COUNTS of current lines per tenant, nothing else. Forced
-row-level security also applies to the table owner, so the owner role gets a SELECT-only policy
-on `import_lines` for the function to read through; `cbam_app` is not that role.
+SECURITY DEFINER function that returns COUNTS of current lines per prefix and tenant, nothing
+else, and only in platform mode. It is owned by the NOLOGIN role `cbam_impact_reader`, which can
+only SELECT `import_lines` (through a policy for that role alone); the table owner and `cbam_app`
+get no such policy. The role and the owner's membership of it are cluster-level and, like the
+roles of 0001, are not dropped by the downgrade (so the upgrade is repeatable).
 
 `import_batches.lease_owner` is the token of the job holding the lease: only that job may renew
 or release it.
@@ -34,6 +36,8 @@ _TABLES = ("parties", "declarations", "import_lines", "import_line_sources")
 
 _SQL = """
 alter table cbam.import_batches add column lease_owner uuid;
+-- Used by the ledger's has_open_exceptions filter and the line detail.
+create index row_exceptions_source_row on cbam.row_exceptions (tenant_id, source_row_id);
 
 create function cbam.import_facts_block_change() returns trigger language plpgsql as $$
 begin
@@ -69,6 +73,7 @@ create table cbam.declarations (
   entry_method text not null check (entry_method in ('cds','gcd','manual','correction')),
   batch_id uuid not null,
   content_sha256 char(64) not null check (content_sha256 ~ '^[0-9a-f]{64}$'),
+  hash_version integer not null default 1 check (hash_version >= 1),  -- see rules.HASH_VERSION
   created_at timestamptz not null default now(),
   unique (tenant_id, id),
   unique (tenant_id, mrn, version),
@@ -110,6 +115,7 @@ create table cbam.import_lines (
   entry_method text not null check (entry_method in ('cds','gcd','manual','correction')),
   change_reason text check (change_reason ~ '^[a-z0-9_]{1,64}$'),
   content_sha256 char(64) not null check (content_sha256 ~ '^[0-9a-f]{64}$'),
+  hash_version integer not null default 1 check (hash_version >= 1),
   created_at timestamptz not null default now(),
   unique (tenant_id, id),
   unique (tenant_id, declaration_id, item_no, version),
@@ -218,27 +224,63 @@ revoke update, delete, truncate on cbam.{t} from cbam_app;
     for t in _TABLES
 )
 
+_ROLE = """
+do $$
+begin
+  if not exists (select from pg_roles where rolname = 'cbam_impact_reader') then
+    create role cbam_impact_reader nologin nobypassrls;
+  end if;
+end $$;
+-- The owner needs membership to hand the function to the role (only the migration user can grant it).
+do $$
+begin
+  if not pg_has_role('cbam_owner', 'cbam_impact_reader', 'member') then
+    grant cbam_impact_reader to cbam_owner;
+  end if;
+end $$;
+"""
+
 _DEFINER = """
--- First cross-tenant code path (docs/SECURITY.md): counts only, current lines only.
-create policy impact_counts_owner on cbam.import_lines for select to cbam_owner using (true);
+-- First cross-tenant code path (docs/SECURITY.md): counts only, current lines only. It runs as a
+-- dedicated NOLOGIN role that can do nothing but read import_lines (and, through forced RLS, only
+-- because of the policy below), not as the table owner.
+grant usage on schema cbam to cbam_impact_reader;
+grant create on schema cbam to cbam_impact_reader;
+grant select on cbam.import_lines to cbam_impact_reader;
+create policy impact_reader_select on cbam.import_lines for select to cbam_impact_reader
+  using (true);
 
 create function cbam.impact_line_counts_by_code_prefix(prefixes text[])
-returns table (tenant_id uuid, line_count bigint)
-language sql stable security definer set search_path = cbam, pg_temp as $$
-  select l.tenant_id, count(*)::bigint
-    from cbam.import_lines l
-   where not exists (select 1 from cbam.import_lines n
-                      where n.tenant_id = l.tenant_id and n.supersedes_id = l.id)
-     and exists (select 1 from unnest(prefixes) p
-                  where p ~ '^[0-9]{1,10}$' and left(l.commodity_code, length(p)) = p)
-   group by l.tenant_id
-$$;
+returns table (prefix text, tenant_id uuid, line_count bigint)
+language plpgsql stable security definer set search_path = cbam, pg_temp as $$
+begin
+  if not cbam.is_platform() then
+    raise exception 'impact counts are for platform reference-data work only';
+  end if;
+  if cardinality(prefixes) > 1000 then
+    raise exception 'at most 1000 prefixes per call';
+  end if;
+  return query
+    select p, l.tenant_id, count(*)::bigint
+      from unnest(prefixes) as p
+      join cbam.import_lines l
+        on p ~ '^[0-9]{1,10}$' and left(l.commodity_code, length(p)) = p
+     where not exists (select 1 from cbam.import_lines n
+                        where n.tenant_id = l.tenant_id and n.supersedes_id = l.id)
+     group by p, l.tenant_id;
+end $$;
+alter function cbam.impact_line_counts_by_code_prefix(text[]) owner to cbam_impact_reader;
+revoke create on schema cbam from cbam_impact_reader;
 revoke all on function cbam.impact_line_counts_by_code_prefix(text[]) from public;
 grant execute on function cbam.impact_line_counts_by_code_prefix(text[]) to cbam_app;
 """
 
 _DOWN = """
 drop function cbam.impact_line_counts_by_code_prefix(text[]);
+drop policy impact_reader_select on cbam.import_lines;
+revoke select on cbam.import_lines from cbam_impact_reader;
+revoke usage on schema cbam from cbam_impact_reader;
+drop index cbam.row_exceptions_source_row;
 drop table cbam.import_line_sources;
 drop table cbam.import_lines;
 drop table cbam.declarations;
@@ -251,6 +293,7 @@ alter table cbam.import_batches drop column lease_owner;
 
 
 def upgrade() -> None:
+    op.execute(_ROLE)  # cluster-level, like the roles of 0001: created before acting as the owner
     op.execute("set local role cbam_owner")
     op.execute(_SQL)
     op.execute(_RLS)

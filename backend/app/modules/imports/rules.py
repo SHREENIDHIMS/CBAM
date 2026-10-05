@@ -279,6 +279,16 @@ ISSUES: dict[str, tuple[str, str]] = {
         "Another row in this file has the same declaration reference and item number with "
         "different details. Correct the file and re-upload.",
     ),
+    "SOURCE_CONFLICTS_WITH_CORRECTION": (
+        "error",
+        "This row differs from a value that was corrected or entered by hand. It was not "
+        "applied; a reviewer must decide which value stands.",
+    ),
+    "OLDER_EXTRACT_CONFLICT": (
+        "error",
+        "This row differs from facts taken from a more recent report. It was not applied; "
+        "a reviewer must decide which value stands.",
+    ),
     "VALUE_PRECISION": (
         "error",
         "The customs value has more than 8 decimal places. It is not rounded for you: "
@@ -435,6 +445,9 @@ class ImportLimits:
     chunk_max_chars: int
     max_attempts: int
     lease_seconds: int
+    # Added to the retry back-off when a failed run hands its lease back, so a retry that fires a
+    # moment early still finds the lease expired and does not stop on it.
+    retry_margin_seconds: int = 5
 
 
 def header_problem(cells: Sequence[str], limits: ImportLimits) -> str | None:
@@ -819,7 +832,9 @@ _ENTRY_METHODS: dict[str, str] = {
     "get_customs_data": "gcd",
     "cds_export": "cds",
     "data_request": "cds",
-    "manual_upload": "manual",
+    # `manual` is reserved for human-keyed entry (R1-004). An uploaded file is `cds` whoever
+    # prepared it; the mapping of data_request and manual_upload is provisional (DATA-DEC-025).
+    "manual_upload": "cds",
     "manual_entry": "manual",
     "feed": "cds",
 }
@@ -850,10 +865,16 @@ def _canonical(value: object) -> object:
     raise TypeError(f"cannot hash {type(value).__name__}")
 
 
+# Mixed into every content hash and stored with the row. Adding or removing a hashed field must
+# raise it AND ship a plan for existing rows, otherwise every stored row would look "changed".
+HASH_VERSION = 1
+
+
 def content_hash(parts: Mapping[str, object]) -> str:
     """SHA-256 of the facts of a declaration or line, stable across runs and key order. Strings,
     Decimals, dates, ints and None only: a float is refused (CLAUDE.md rule 5)."""
     canonical = {k: _canonical(v) for k, v in parts.items()}
+    canonical["_hash_version"] = str(HASH_VERSION)
     text = json.dumps(canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(text.encode()).hexdigest()
 
@@ -1079,10 +1100,56 @@ def reconcile(existing_hash: str | None, incoming_hash: str, *, same_batch: bool
     return "conflict" if same_batch else "changed"
 
 
+CORRECTED_ENTRY_METHODS: frozenset[str] = frozenset({"correction", "manual"})
+
+
+def reconcile_version(
+    *,
+    current_hash: str | None,
+    current_entry_method: str | None,
+    current_value_source: str | None,
+    current_batch_id: object,
+    current_recency: date | None,
+    earlier_hashes: frozenset[str],
+    incoming_hash: str,
+    incoming_batch_id: object,
+    incoming_recency: date,
+) -> str:
+    """What to do with a row whose key already has versions. Stale or hand-made data must never
+    replace newer facts or a human's correction (CLAUDE.md rule 4):
+
+    - `new`: no version yet;
+    - `same`: identical to the current version (only a sighting is recorded);
+    - `seen_earlier`: identical to an EARLIER version (a stale overlapping file): only a sighting;
+    - `blocked_by_correction`: the current version was corrected or keyed by hand: a human decides;
+    - `older_extract`: the report is older than the one the current version came from: a human
+      decides (equal recency lets the later-loaded report win);
+    - `conflict`: two different versions inside one file (a data error);
+    - `changed`: a newer report with different facts supersedes the current version.
+    """
+    if current_hash is None:
+        return "new"
+    if current_hash == incoming_hash:
+        return "same"
+    if incoming_hash in earlier_hashes:
+        return "seen_earlier"
+    if current_entry_method in CORRECTED_ENTRY_METHODS or current_value_source in (
+        "correction",
+        "manual",
+    ):
+        return "blocked_by_correction"
+    if incoming_batch_id == current_batch_id:
+        return "conflict"
+    if current_recency is not None and incoming_recency < current_recency:
+        return "older_extract"
+    return "changed"
+
+
 def check_value_correction(permissions: frozenset[str], reason: str | None) -> Decision:
     """R1-010: a customs-value correction needs `imports:correct` and a written reason. The
-    correction itself (a new version) is built in Phase 3 step 6 onwards; the rule lives here so
-    the guard exists before the endpoint does. ALLOWED or BLOCKED."""
+    correction endpoint is not built yet (it is a later Phase 3 step, after the liable-person rule
+    and manual entry); the rule lives here so the guard exists before the endpoint does.
+    ALLOWED or BLOCKED."""
     if "imports:correct" not in permissions:
         return Decision(
             rule_id="R1-010.value_correction",

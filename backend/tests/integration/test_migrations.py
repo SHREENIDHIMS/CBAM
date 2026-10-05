@@ -122,3 +122,38 @@ def test_0011_import_lines_and_the_impact_function_are_removed_by_downgrade_and_
         "and relrowsecurity and relforcerowsecurity"
     )
     assert _scalar(forced) == 4
+
+
+def test_0011_review_fixes_index_hash_version_and_the_impact_reader_role(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    command.upgrade(_config(monkeypatch), "head")
+    assert (
+        _scalar(
+            "select count(*) from pg_indexes where schemaname = 'cbam' "
+            "and indexname = 'row_exceptions_source_row'"
+        )
+        == 1
+    )
+    assert (
+        _scalar(
+            "select count(*) from information_schema.columns where table_schema = 'cbam' "
+            "and column_name = 'hash_version' and table_name in ('declarations','import_lines')"
+        )
+        == 2
+    )
+    # a NOLOGIN role that owns the function and can only read the lines
+    assert (
+        _scalar(
+            "select rolcanlogin or rolsuper or rolbypassrls or rolcreaterole "
+            "from pg_roles where rolname = 'cbam_impact_reader'"
+        )
+        is False
+    )
+    assert (
+        _scalar(
+            "select pg_get_userbyid(proowner) from pg_proc "
+            "where proname = 'impact_line_counts_by_code_prefix'"
+        )
+        == "cbam_impact_reader"
+    )
