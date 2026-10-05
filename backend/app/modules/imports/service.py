@@ -217,6 +217,8 @@ def receive_file(
     """
     if not rules.acquired_on_is_valid(metadata.acquired_on, as_of):
         raise InvalidRequestError("acquired_on cannot be in the future")
+    if not rules.window_is_valid(metadata.window_start, metadata.window_end, as_of):
+        raise InvalidRequestError("window_start and window_end cannot be in the future")
     fingerprint = rules.request_fingerprint(metadata.declared())
 
     with open_session() as s:

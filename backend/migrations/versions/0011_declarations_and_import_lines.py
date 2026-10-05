@@ -18,8 +18,11 @@ is GBP (no FX here: R1-035 is Phase 10). `value_source` records how the value wa
 SECURITY DEFINER function that returns COUNTS of current lines per prefix and tenant, nothing
 else, and only in platform mode. It is owned by the NOLOGIN role `cbam_impact_reader`, which can
 only SELECT `import_lines` (through a policy for that role alone); the table owner and `cbam_app`
-get no such policy. The role and the owner's membership of it are cluster-level and, like the
-roles of 0001, are not dropped by the downgrade (so the upgrade is repeatable).
+get no such policy. The role is created NOLOGIN NOINHERIT NOBYPASSRLS (and corrected if it
+already exists). The table owner is made a member only while the migration (or its downgrade)
+hands the function over or drops it, and the membership is revoked again, so no other role can
+SET ROLE into the reader. The role itself is cluster-level and, like the roles of 0001, is not
+dropped by the downgrade (so the upgrade is repeatable).
 
 `import_batches.lease_owner` is the token of the job holding the lease: only that job may renew
 or release it.
@@ -73,7 +76,7 @@ create table cbam.declarations (
   entry_method text not null check (entry_method in ('cds','gcd','manual','correction')),
   batch_id uuid not null,
   content_sha256 char(64) not null check (content_sha256 ~ '^[0-9a-f]{64}$'),
-  hash_version integer not null default 1 check (hash_version >= 1),  -- see rules.HASH_VERSION
+  hash_version integer not null default 1 check (hash_version in (1)),  -- rules.HASH_VERSION
   created_at timestamptz not null default now(),
   unique (tenant_id, id),
   unique (tenant_id, mrn, version),
@@ -115,7 +118,7 @@ create table cbam.import_lines (
   entry_method text not null check (entry_method in ('cds','gcd','manual','correction')),
   change_reason text check (change_reason ~ '^[a-z0-9_]{1,64}$'),
   content_sha256 char(64) not null check (content_sha256 ~ '^[0-9a-f]{64}$'),
-  hash_version integer not null default 1 check (hash_version >= 1),
+  hash_version integer not null default 1 check (hash_version in (1)),
   created_at timestamptz not null default now(),
   unique (tenant_id, id),
   unique (tenant_id, declaration_id, item_no, version),
@@ -228,14 +231,48 @@ _ROLE = """
 do $$
 begin
   if not exists (select from pg_roles where rolname = 'cbam_impact_reader') then
-    create role cbam_impact_reader nologin nobypassrls;
+    create role cbam_impact_reader nologin noinherit nobypassrls;
   end if;
+  -- Correct a pre-existing role too: it must never be able to log in, inherit or bypass RLS.
+  begin
+    alter role cbam_impact_reader nologin noinherit nobypassrls;
+  exception when insufficient_privilege then
+    if exists (select from pg_roles where rolname = 'cbam_impact_reader'
+               and (rolcanlogin or rolinherit or rolbypassrls or rolsuper)) then
+      raise exception 'role cbam_impact_reader has unsafe attributes and this user cannot fix them';
+    end if;
+  end;
 end $$;
--- The owner needs membership to hand the function to the role (only the migration user can grant it).
+"""
+
+# Needed only while the migration hands the function to the role (and while the downgrade drops
+# it); the membership is revoked again so no other role can SET ROLE into the reader.
+_GRANT_MEMBERSHIP = """
 do $$
 begin
   if not pg_has_role('cbam_owner', 'cbam_impact_reader', 'member') then
     grant cbam_impact_reader to cbam_owner;
+  end if;
+end $$;
+"""
+
+_REVOKE_MEMBERSHIP = """
+do $$
+declare
+  g record;
+begin
+  for g in select pg_get_userbyid(m.grantor) as grantor from pg_auth_members m
+            where m.roleid = 'cbam_impact_reader'::regrole and m.member = 'cbam_owner'::regrole
+  loop
+    begin
+      execute format('revoke cbam_impact_reader from cbam_owner granted by %I', g.grantor);
+    exception when others then
+      null;  -- someone else's grant: checked below
+    end;
+  end loop;
+  if pg_has_role('cbam_owner', 'cbam_impact_reader', 'member') then
+    raise exception 'cbam_owner is still a member of cbam_impact_reader (granted by another '
+      'role): remove that membership as a superuser or as the role that granted it';
   end if;
 end $$;
 """
@@ -293,13 +330,22 @@ alter table cbam.import_batches drop column lease_owner;
 
 
 def upgrade() -> None:
+    # Earlier migrations leave `set local role cbam_owner` in force inside one transaction.
+    op.execute("reset role")
     op.execute(_ROLE)  # cluster-level, like the roles of 0001: created before acting as the owner
+    op.execute(_GRANT_MEMBERSHIP)
     op.execute("set local role cbam_owner")
     op.execute(_SQL)
     op.execute(_RLS)
     op.execute(_DEFINER)
+    op.execute("reset role")
+    op.execute(_REVOKE_MEMBERSHIP)  # cbam_owner, cbam_app and the migration role cannot use it
 
 
 def downgrade() -> None:
+    op.execute("reset role")
+    op.execute(_GRANT_MEMBERSHIP)  # the owner needs it to drop the function the role owns
     op.execute("set local role cbam_owner")
     op.execute(_DOWN)
+    op.execute("reset role")
+    op.execute(_REVOKE_MEMBERSHIP)

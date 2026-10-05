@@ -507,7 +507,8 @@ def _insert_exceptions(
     batch_id: UUID,
     now: datetime,
     items: list[tuple[int, UUID | None, rules.Issue]],
-) -> None:
+) -> int:
+    """Insert the exceptions that are not already there; returns how many were new."""
     values: dict[tuple[int, str, str], dict[str, Any]] = {}
     for number, source_row_id, issue in items:
         values[(number, issue.field, issue.code)] = {
@@ -524,12 +525,15 @@ def _insert_exceptions(
             "row_version": 1,
             "created_at": now,
         }
-    if values:
-        session.execute(
-            pg_insert(row_exceptions)
-            .values(list(values.values()))
-            .on_conflict_do_nothing(index_elements=["batch_id", "row_number", "field", "code"])
-        )
+    if not values:
+        return 0
+    result = session.execute(
+        pg_insert(row_exceptions)
+        .values(list(values.values()))
+        .on_conflict_do_nothing(index_elements=["batch_id", "row_number", "field", "code"])
+        .returning(row_exceptions.c.id)
+    )
+    return len(result.all())
 
 
 def _reject(
@@ -861,8 +865,12 @@ def _reject_file_conflicts(
         if current.lease_owner != lease.token:
             raise LeaseLostError()
         found = normalisation.find_file_conflicts(s, tenant_id, batch_id, match, ctx)
-        if found:
+        added = (
             _insert_exceptions(s, tenant_id=tenant_id, batch_id=batch_id, now=now, items=found)
+            if found
+            else 0
+        )
+        if added:  # a rerun finds the same rows, adds nothing and writes no second event
             record(
                 s,
                 tenant_id=tenant_id,

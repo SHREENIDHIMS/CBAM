@@ -433,3 +433,34 @@ def test_imp_59_r1_003_a_lost_worker_while_normalising_resumes_without_duplicate
     assert (done.attempts, done.lines_created, done.lines_unchanged) == (2, 50, 0)
     assert count(app_engine, tenant, "import_lines") == 50
     assert count(app_engine, tenant, "import_line_sources") == 50
+
+
+def test_imp_60_r1_025_the_conflict_pre_pass_is_idempotent_and_audits_once_on_resume(
+    app_engine: Engine, layout: UUID
+) -> None:
+    tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
+    rows = rows_for(range(1, 6))
+    twin = list(rows[0])
+    twin[VALUE] = "1.00"  # rows 1 and 6 disagree about one key
+    batch = receive(app_engine, store, tenant, to_csv([*rows, twin]), meta())
+
+    def crash(_rows: int) -> None:
+        raise RuntimeError("worker error after the first chunk")
+
+    with pytest.raises(processing.ImportJobError):
+        run(app_engine, store, tenant, batch.id, chunk_rows=2, after_normalise_chunk=crash)
+    assert run(app_engine, store, tenant, batch.id, clock=at(1), chunk_rows=2) == (
+        "completed_with_errors"
+    )
+    assert run(app_engine, store, tenant, batch.id, chunk_rows=2) == "completed_with_errors"
+    assert exceptions(app_engine, tenant, batch.id) == {
+        (1, "line.item_no", "LINE_CONFLICT_IN_FILE"),
+        (6, "line.item_no", "LINE_CONFLICT_IN_FILE"),
+    }
+    events = q(
+        app_engine,
+        tenant,
+        "select count(*) from cbam.audit_events where action = 'import_batch.file_conflicts_found'",
+    )
+    assert events == [(1,)]
+    assert count(app_engine, tenant, "import_lines") == 4

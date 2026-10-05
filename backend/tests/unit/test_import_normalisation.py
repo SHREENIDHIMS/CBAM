@@ -266,3 +266,21 @@ def test_imp_47_r1_005_the_new_issue_codes_have_fixed_messages() -> None:
     for code in ("SOURCE_CONFLICTS_WITH_CORRECTION", "OLDER_EXTRACT_CONFLICT"):
         assert rules.issue_severity(code) == "error"
         assert len(rules.issue_message(code)) > 20
+
+
+def test_imp_47_r1_005_a_sighting_of_an_earlier_version_beats_the_correction_block() -> None:
+    """A stale file that matches an earlier version while a correction is current is only a
+    sighting: `seen_earlier` is decided before `blocked_by_correction`."""
+    assert (
+        decide(current_entry_method="correction", current_value_source="correction",
+               incoming_hash="a") == "seen_earlier"
+    )  # fmt: skip
+    assert decide(current_entry_method="correction", incoming_hash="z") == "blocked_by_correction"
+
+
+def test_r1_003_window_dates_cannot_be_after_the_receipt_date() -> None:
+    today = date(2027, 3, 1)
+    assert rules.window_is_valid(None, None, today)
+    assert rules.window_is_valid(date(2027, 2, 1), today, today)
+    assert not rules.window_is_valid(date(2027, 2, 1), date(2027, 3, 2), today)
+    assert not rules.window_is_valid(date(2027, 3, 2), None, today)

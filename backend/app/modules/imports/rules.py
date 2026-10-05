@@ -139,6 +139,13 @@ def request_fingerprint(declared: Mapping[str, str | None]) -> bytes:
     return hashlib.sha256(canonical.encode()).digest()
 
 
+def window_is_valid(window_start: date | None, window_end: date | None, as_of: date) -> bool:
+    """The report window cannot end (or start) after the day the file is received (UK date from
+    the injected clock). The acquired date and the window end are the recency inputs that decide
+    which of two different reports is newer, so neither may point at the future."""
+    return all(d is None or d <= as_of for d in (window_start, window_end))
+
+
 def acquired_on_is_valid(acquired_on: date | None, as_of: date) -> bool:
     """The acquisition date cannot be in the future (UK date from the injected clock)."""
     return acquired_on is None or acquired_on <= as_of
@@ -1126,6 +1133,13 @@ def reconcile_version(
       decides (equal recency lets the later-loaded report win);
     - `conflict`: two different versions inside one file (a data error);
     - `changed`: a newer report with different facts supersedes the current version.
+
+    Recency comes from user-declared batch metadata (acquired date, else window end, else the
+    received date), bounded to not-after-receipt. A file with none of them counts as received
+    today and so as NEWER than a dated older extract: a known limitation. Nothing is ever
+    destroyed by this decision: both versions are kept and a review exception is raised.
+    `hash_version` is NOT compared here: a HASH_VERSION bump needs a migration plan for the
+    stored hashes first, or every row would look changed.
     """
     if current_hash is None:
         return "new"

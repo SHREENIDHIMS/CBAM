@@ -243,7 +243,7 @@ clock, money, decisions, tasks.
 1. - [ ] Un-skip TH-01…TH-11; implement `threshold/rules.py`: forward test (any day, 30 days
    ahead, uses forecast inputs), backward test (1st of month, prior 12 months, 2027
    floor), earliest-date combination, exclusions of out-of-scope / excluded / flagged lines.
-*Note (REG-DEC-023): batches with rejected rows must make the threshold conclusion show as incomplete, not "below threshold", until the rows are resolved or ruled out of scope.*
+*Note (REG-DEC-023): batches with rejected rows must make the threshold conclusion show as incomplete, not "below threshold", until the rows are resolved or ruled out of scope. This includes rows rejected for FILE conflicts (`LINE_CONFLICT_IN_FILE`, `DECLARATION_FACTS_CONFLICT`, `SOURCE_CONFLICTS_WITH_CORRECTION`, `OLDER_EXTRACT_CONFLICT`): rejecting both rows of a conflict can drop a genuine line from a total, so those rows must be listed for human resolution.*
 2. - [ ] Minimal forecast input (expected tax point + value + source) to feed the forward test
    (full versioned register is R1-037 in Phase 10).
 3. - [ ] `threshold_snapshots` + `threshold_events` with decision IDs; snapshot stores the

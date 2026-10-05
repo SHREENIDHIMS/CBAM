@@ -157,3 +157,49 @@ def test_0011_review_fixes_index_hash_version_and_the_impact_reader_role(
         )
         == "cbam_impact_reader"
     )
+
+
+def test_0011_the_impact_reader_role_cannot_be_used_by_anyone_else_and_the_function_works(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Security H1: the role is NOLOGIN NOINHERIT NOBYPASSRLS, the owner and the app are not
+    members (so they cannot SET ROLE into it), and the guarded function still works."""
+    cfg = _config(monkeypatch)
+    cfg.set_main_option("script_location", str(BACKEND / "migrations"))
+    command.upgrade(cfg, "head")
+    assert (
+        _scalar(
+            "select rolcanlogin or rolinherit or rolbypassrls or rolsuper "
+            "from pg_roles where rolname = 'cbam_impact_reader'"
+        )
+        is False
+    )
+    for member in ("cbam_app", "cbam_owner"):
+        assert _scalar(f"select pg_has_role('{member}', 'cbam_impact_reader', 'USAGE')") is False
+        assert _scalar(f"select pg_has_role('{member}', 'cbam_impact_reader', 'MEMBER')") is False
+    # the same holds after a downgrade and a second upgrade
+    command.downgrade(cfg, "0010")
+    assert _scalar("select pg_has_role('cbam_owner', 'cbam_impact_reader', 'MEMBER')") is False
+    command.upgrade(cfg, "head")
+    assert _scalar("select pg_has_role('cbam_owner', 'cbam_impact_reader', 'MEMBER')") is False
+    assert TEST_URL
+    with create_engine(TEST_URL).begin() as conn:
+        conn.execute(text("select set_config('app.is_platform', 'on', true)"))
+        rows = conn.execute(
+            text("select * from cbam.impact_line_counts_by_code_prefix(array['72'])")
+        ).all()
+    assert rows == [] or all(len(r) == 3 for r in rows)  # counts only, in platform mode
+    with create_engine(TEST_URL).begin() as conn, pytest.raises(Exception, match="platform"):
+        conn.execute(text("select * from cbam.impact_line_counts_by_code_prefix(array['72'])"))
+
+
+def test_0011_hash_version_only_accepts_known_versions(monkeypatch: pytest.MonkeyPatch) -> None:
+    command.upgrade(_config(monkeypatch), "head")
+    assert (
+        _scalar(
+            "select count(*) from pg_constraint where conrelid in "
+            "('cbam.declarations'::regclass, 'cbam.import_lines'::regclass) "
+            "and pg_get_constraintdef(oid) like '%hash_version = 1%'"
+        )
+        == 2
+    )
