@@ -82,6 +82,8 @@ def list_versions(dataset: str, ctx: Read) -> list[dict[str, Any]]:
 def get_version(dataset: str, version: str, response: Response, ctx: Read) -> dict[str, Any]:
     with ctx.session() as s:
         found = service.get_version(s, dataset, version)
+    if "refdata:activate" not in ctx.permissions:  # platform admins see totals, not clients
+        found = {**found, "impact_report": service.redact_impact_report(found["impact_report"])}
     response.headers["ETag"] = etag(found["row_version"])
     return found
 

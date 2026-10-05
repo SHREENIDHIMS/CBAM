@@ -97,6 +97,31 @@ headings, too many columns, long headings, cell and row caps, 5,000 comma-only r
 character budget, NUL, crash-loop guard, permanent errors, infected file); IMP-19 ambiguous or
 incomplete layout, layout chosen by acquisition date; IMP-20 beat sweeper recovers a batch
 after a broker outage; IMP-22 lease takeover of a killed worker, crash-loop failure, duplicate deliveries count once, lease renewed per chunk, attempts never go down; IMP-23 quoted-newline record attacks stopped by the record guard (with a bounded-memory test) and honest quoted newlines, CRLF and BOM still import; IMP-21 no rows for a final batch, resolution lock, cursor range.
+Normalisation scenario IDs (Phase 3 steps 4 and 5; backend `tests/integration/test_import_lines.py`,
+`test_import_staleness.py`, `test_import_leases.py` and `tests/unit/test_import_normalisation.py`).
+They start at IMP-37 so they do not collide with IMP-20 to IMP-23 above. IMP-37 (exit gate:
+replay) replaying a file or an overlapping file, also processed at once, resumed after a crash or
+after a lost worker (IMP-59), creates no declaration or line and records `duplicate_seen`; IMP-38
+(exit gate: lineage) every line resolves to its source row, batch and file SHA-256 (IMP-58: for a
+superseded line and for a sighting too); IMP-39 a changed source row is version 2 and keeps version
+1, a changed declaration is version 2, and rows of one file that disagree are ALL rejected; IMP-40
+exact commodity code and mass at 6 places; IMP-41 the four tables are append-only for the app and
+the owner, value fields cannot change in place, a correction needs a reason and a valid chain;
+IMP-42 no tax point, scope, quarter or threshold column or field, acceptance date never copied;
+IMP-43 customs value: GBP only for GBP, never rounded, no FX; IMP-44 rows with errors never
+normalise, warning-only rows do; IMP-45 the 500-row gate end to end (463 lines, 37 exceptions;
+synthetic provisional layout) and chunk audit events of counts and at most 500 ids; IMP-46 tenant
+isolation and the app-level filter with RLS off; IMP-47 hashing, `reconcile_version` (stale,
+corrected, older and conflicting outcomes), hash version and no float (hypothesis); IMP-48 the
+value-correction guard and the `imports:correct` permission; IMP-49 the commodity-code impact
+function (counts only, platform mode only, 1000-prefix cap, owned by the NOLOGIN role) and the
+Phase 2 report; IMP-50 the ledger API (filters, pagination, detail with raw rows and file hash,
+permissions); IMP-51 to IMP-53 lease owner token, release after a handled failure with the retry
+margin, time-based renewal; IMP-54 stale overlapping files, corrections and older extracts never
+supersede newer facts; IMP-55 every line shows the CURRENT declaration; IMP-56 the impact report
+shows totals to a platform admin and clients to a domain owner; IMP-57 a job that lost its lease
+cannot complete or reject; IMP-60 the conflict pre-pass is idempotent on resume (one audit event). `test_migrations.py` checks the impact role (no login, inherit, bypass-RLS, superuser, create-role, create-db or replication attribute; `cbam_app` and `cbam_owner` are not members; no member can SET ROLE into it or inherit it, and ADMIN OPTION is held only by the migration user or a role that already controls roles), the hash_version CHECK and that the guarded function works in platform mode. `test_rls.py` has an allow-list of every policy that is not plain
+tenant isolation.
 
 ### Portal extras (R1-055, R1-056)
 EU template fixture pre-fills the form with `EU_TEMPLATE` provenance; unknown template

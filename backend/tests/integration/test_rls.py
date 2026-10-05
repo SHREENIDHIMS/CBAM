@@ -155,3 +155,73 @@ def test_every_cbam_table_has_forced_rls(admin_engine: Engine) -> None:
     assert rows, "no cbam tables found"
     missing = [name for name, enabled, forced in rows if not (enabled and forced)]
     assert missing == [], f"tables without forced RLS: {missing}"
+
+
+_TENANT_QUAL = "(tenant_id = cbam.current_tenant())"
+# Every policy that is NOT plain tenant isolation must be listed here on purpose (a reviewer sees
+# the list change). `impact_reader_select` is for the NOLOGIN role of the cross-tenant impact
+# function (migration 0011, docs/SECURITY.md) and for no other role.
+_ALLOWED_POLICIES: set[tuple[str, str]] = {
+    ("audit_events", "audit_append"),
+    ("audit_events", "audit_read"),
+    ("import_lines", "impact_reader_select"),
+    ("memberships", "memberships_removed"),
+    ("memberships", "memberships_updated"),
+    ("memberships", "memberships_visible"),
+    ("memberships", "memberships_written"),
+    ("platform_admins", "platform_admin_granted"),
+    ("platform_admins", "platform_admin_revoked"),
+    ("platform_admins", "platform_admin_self"),
+    ("platform_domain_owners", "domain_owner_granted"),
+    ("platform_domain_owners", "domain_owner_revoked"),
+    ("platform_domain_owners", "domain_owner_self"),
+    ("regulatory_sources", "open_read"),
+    ("regulatory_sources", "platform_insert"),
+    ("regulatory_sources", "platform_update"),
+    ("ref_datasets", "open_read"),
+    ("ref_datasets", "platform_insert"),
+    ("ref_dataset_versions", "open_read"),
+    ("ref_dataset_versions", "platform_insert"),
+    ("ref_dataset_versions", "platform_update"),
+    ("tenants", "platform_creates"),
+    ("tenants", "tenant_updates"),
+    ("tenants", "tenant_visible"),
+    ("users", "users_updated"),
+    ("users", "users_visible"),
+    ("users", "users_written"),
+}
+
+
+def test_every_policy_that_is_not_tenant_isolation_is_on_the_allow_list(
+    admin_engine: Engine,
+) -> None:
+    """Reference-data tables (`ref_*`) are global by design: open read, platform-mode insert."""
+    with admin_engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                "select tablename, policyname, coalesce(qual, '') from pg_policies"
+                " where schemaname = 'cbam'"
+            )
+        ).all()
+    assert rows
+    unlisted = [
+        (table, policy)
+        for table, policy, qual in rows
+        if qual != _TENANT_QUAL
+        and (table, policy) not in _ALLOWED_POLICIES
+        and not (table.startswith("ref_") and policy in ("open_read", "platform_insert"))
+    ]
+    assert unlisted == [], (
+        f"policies that are not tenant isolation and not allow-listed: {unlisted}"
+    )
+    # the one policy that reads across tenants is for the impact role only
+    with admin_engine.connect() as conn:
+        roles = {
+            r[0]
+            for r in conn.execute(
+                text(
+                    "select roles::text from pg_policies where policyname = 'impact_reader_select'"
+                )
+            )
+        }
+    assert roles == {"{cbam_impact_reader}"}

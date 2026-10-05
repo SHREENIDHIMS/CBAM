@@ -44,6 +44,7 @@ ROLE_PERMISSIONS: Mapping[str, frozenset[str]] = {
         | {
             "tasks:write",
             "imports:write",
+            "imports:correct",
             "suppliers:write",
             "documents:write",
             "outreach:send",
@@ -60,6 +61,7 @@ ROLE_PERMISSIONS: Mapping[str, frozenset[str]] = {
             "tenant:members_manage",
             "tasks:write",
             "imports:write",
+            "imports:correct",
             "suppliers:write",
             "documents:write",
             "registration:read",
@@ -80,7 +82,12 @@ ROLE_PERMISSIONS: Mapping[str, frozenset[str]] = {
 
 # Never available to a tax agent acting as a tax agent, whatever the matrix says.
 TAX_AGENT_FORBIDDEN: frozenset[str] = frozenset(
-    {"registration:submit_as_liable_person", "tenant:members_manage", "refdata:activate"}
+    {
+        "registration:submit_as_liable_person",
+        "tenant:members_manage",
+        "refdata:activate",
+        "imports:correct",  # R1-010: a tax agent cannot overwrite customs facts
+    }
 )
 
 ALL_PERMISSIONS: frozenset[str] = frozenset().union(*ROLE_PERMISSIONS.values())

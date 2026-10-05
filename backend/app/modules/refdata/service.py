@@ -286,6 +286,10 @@ class AffectedItem:
     kind: str
     ref: str
     detail: str
+    # Optional structure for providers that count per client: `group` names what was counted (a
+    # code prefix) and `count` how many. Lets a caller without `refdata:activate` see totals only.
+    group: str = ""
+    count: int = 0
 
 
 # A provider answers "which records would change outcome?" for one dataset. Phase 3 registers
@@ -324,6 +328,35 @@ def _active_version(session: Session, dataset: str) -> Any:
         ),
         {"n": dataset},
     ).one_or_none()
+
+
+def redact_impact_report(report: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The report as a caller WITHOUT `refdata:activate` may see it: per-client items (which name
+    a client by id) become totals per group: how many clients and lines, never which."""
+    if report is None:
+        return None
+    affected = report.get("affected") or {}
+    items = affected.get("items") or []
+    totals: dict[tuple[str, str], list[int]] = {}
+    kept: list[dict[str, Any]] = []
+    for item in items:
+        if item.get("group"):
+            t = totals.setdefault((item["kind"], item["group"]), [0, 0])
+            t[0] += 1
+            t[1] += int(item["count"])
+        else:
+            kept.append(item)
+    kept.extend(
+        {
+            "kind": kind,
+            "ref": group,
+            "detail": f"{lines} current record(s) across {clients} client(s) under {group}",
+            "group": group,
+            "count": lines,
+        }
+        for (kind, group), (clients, lines) in sorted(totals.items())
+    )
+    return {**report, "affected": {**affected, "count": len(kept), "items": kept}}
 
 
 def build_impact_report(
@@ -411,6 +444,7 @@ def build_impact_report(
             "count": len(affected),
             "items": [
                 {"kind": a.kind, "ref": a.ref, "detail": a.detail}
+                | ({"group": a.group, "count": a.count} if a.group else {})
                 for a in affected[:_MAX_REPORTED_AFFECTED]
             ],
             "truncated": len(affected) > _MAX_REPORTED_AFFECTED,

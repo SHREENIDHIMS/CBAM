@@ -1,7 +1,8 @@
-"""SQLAlchemy Core definitions mirroring migrations 0009 and 0010 (the migrations are the source
+"""SQLAlchemy Core definitions mirroring migrations 0009 to 0011 (the migrations are the source
 of truth)."""
 
 from sqlalchemy import (
+    ARRAY,
     BigInteger,
     Column,
     Date,
@@ -9,6 +10,7 @@ from sqlalchemy import (
     Integer,
     LargeBinary,
     MetaData,
+    Numeric,
     Table,
     Text,
     Uuid,
@@ -73,6 +75,7 @@ import_batches = Table(
     Column("layout_status", Text),
     Column("attempts", Integer, nullable=False),
     Column("lease_expires_at", DateTime(timezone=True)),
+    Column("lease_owner", Uuid),
     Column("created_at", DateTime(timezone=True)),
     Column("created_by", Uuid),
     Column("updated_at", DateTime(timezone=True)),
@@ -110,4 +113,83 @@ row_exceptions = Table(
     Column("created_at", DateTime(timezone=True)),
     Column("updated_at", DateTime(timezone=True)),
     Column("row_version", Integer, nullable=False),
+)
+
+parties = Table(
+    "parties",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("tenant_id", Uuid, nullable=False),
+    Column("eori", Text),
+    Column("name", Text),
+    Column("created_at", DateTime(timezone=True)),
+)
+
+declarations = Table(
+    "declarations",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("tenant_id", Uuid, nullable=False),
+    Column("mrn", Text, nullable=False),
+    Column("version", Integer, nullable=False),
+    Column("supersedes_id", Uuid),
+    Column("acceptance_date", Date, nullable=False),
+    Column("acceptance_at", DateTime(timezone=True)),
+    Column("procedure_code", Text),
+    Column("additional_procedure_codes", ARRAY(Text)),
+    Column("importer_party_id", Uuid),
+    Column("declarant_party_id", Uuid),
+    Column("representative_party_id", Uuid),
+    Column("representation_type", Text, nullable=False),
+    Column("eori_context", Text),
+    Column("entry_method", Text, nullable=False),
+    Column("batch_id", Uuid, nullable=False),
+    Column("content_sha256", Text, nullable=False),
+    Column("hash_version", Integer, nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+)
+
+import_lines = Table(
+    "import_lines",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("tenant_id", Uuid, nullable=False),
+    Column("declaration_id", Uuid, nullable=False),
+    Column("item_no", Integer, nullable=False),
+    Column("version", Integer, nullable=False),
+    Column("supersedes_id", Uuid),
+    Column("commodity_code", Text, nullable=False),
+    Column("description", Text),
+    Column("net_mass_kg", Numeric(20, 6, asdecimal=True), nullable=False),
+    Column("supplementary_qty", Numeric(20, 6, asdecimal=True)),
+    Column("supplementary_unit", Text),
+    Column("customs_value_source", Numeric(24, 8, asdecimal=True), nullable=False),
+    Column("customs_value_currency", Text, nullable=False),
+    Column("customs_value_gbp", Numeric(18, 2, asdecimal=True)),
+    Column("customs_value_gbp_note", Text),
+    Column("fx_method", Text),
+    Column("valuation_basis", Text),
+    Column("value_source", Text, nullable=False),
+    Column("value_override_reason", Text),
+    Column("country_of_origin_declared", Text, nullable=False),
+    Column("cpc", Text),
+    Column("batch_id", Uuid, nullable=False),
+    Column("source_row_id", Uuid, nullable=False),
+    Column("entry_method", Text, nullable=False),
+    Column("change_reason", Text),
+    Column("content_sha256", Text, nullable=False),
+    Column("hash_version", Integer, nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+)
+
+import_line_sources = Table(
+    "import_line_sources",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("tenant_id", Uuid, nullable=False),
+    Column("import_line_id", Uuid, nullable=False),
+    Column("source_row_id", Uuid, nullable=False),
+    Column("report_type", Text),
+    Column("role", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True)),
 )

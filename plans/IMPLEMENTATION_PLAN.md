@@ -166,9 +166,17 @@ clock, money, decisions, tasks.
    *Partial until later phases: supplier mapping against the register arrives in Phase 6 (only
    an empty supplier is flagged now), and procedure-code (tax-point input) checks arrive with
    Phase 4; commodity-code shape is provisional (DATA-DEC-024).*
-4. - [ ] Normalise into `declarations`, `import_lines`, `parties` with exact commodity code,
+4. - [x] Normalise into `declarations`, `import_lines`, `parties` with exact commodity code,
    net mass kg (6 dp), customs value + valuation basis, origin as declared (R1-005, R1-010).
-5. - [ ] Importer / declarant / agent / acting-on-behalf relationships (R1-006).
+   *Customs value is kept in its own currency; the GBP value is set only for GBP (FX is Phase 10).
+   Append-only tables with source lineage (`import_line_sources`); a changed source row is a new
+   version; overlapping files add `duplicate_seen` links only. Stale data never supersedes: a row
+   equal to ANY earlier version is only a sighting, a file never supersedes a correction or manual
+   entry (`SOURCE_CONFLICTS_WITH_CORRECTION`), and an older report never replaces a newer one
+   (`OLDER_EXTRACT_CONFLICT`); rows of one file that disagree are ALL rejected.*
+5. - [x] Importer / declarant / agent / acting-on-behalf relationships (R1-006).
+   *Captured as FIELDS only (party EORIs and `representation_type` as reported, never inferred);
+   no liable-person logic here: that is step 6 (PR4). Real-report mapping: DATA-DEC-025.*
 6. - [ ] Liable-person determination rule + decision record; fixtures for direct importer,
    broker/declarant, acting-on-behalf (R1-036).
 7. - [ ] Manual import entry with reason; same validation and downstream fields (R1-004).
@@ -184,10 +192,10 @@ clock, money, decisions, tasks.
    every cell that came from an uploaded file (docs/SECURITY.md files checklist).
 
 **Exit gate**
-- [ ] **500-row CDS file imports cleanly with errors reported per row** (handbook gate) — *row validation, raw rows and the exception report are proven by IMP-10 (500 rows, 37 seeded bad rows, synthetic provisional layout); tick when step 4 normalises the valid rows and the layout is the real one*
+- [ ] **500-row CDS file imports cleanly with errors reported per row** (handbook gate) — *proven on the provisional synthetic layout by IMP-10/IMP-45 (463 lines and 37 exceptions); tick when re-run on a real masked HMRC report (DATA-DEC-002)*
 - [ ] A year of fixture "Get customs data" reports loads without duplicates and a missing window shows as a gap with a task
-- [ ] Replaying a file creates no duplicate business records
-- [ ] Every line links to its exact source row and file
+- [x] Replaying a file creates no duplicate business records
+- [x] Every line links to its exact source row and file
 - [ ] Freight-forwarder-as-declarant fixture keeps importer liable
 
 ---
@@ -199,6 +207,10 @@ clock, money, decisions, tasks.
 
 1. - [ ] Scope rule: commodity code at tax-point date against active code list →
    in/out + rule/dataset version (R1-007).
+   *Declaration facts (acceptance date, parties, representation) used here and by the tax-point
+   step 5 must come from the CURRENT declaration version resolved by MRN
+   (`ledger.current_declaration`); never read `import_lines.declaration_id` directly: a line keeps
+   the declaration version it was created under, which may since have been superseded.*
 2. - [ ] Geography facts: GB/XI EORI context, NI, Crown Dependencies, Overseas Territories,
    UK Continental Shelf; rules via `ref_geography_rules` (R1-009).
 3. - [ ] Origin: declared vs validated origin, evidence links, UK-origin exemption only with
@@ -231,7 +243,7 @@ clock, money, decisions, tasks.
 1. - [ ] Un-skip TH-01…TH-11; implement `threshold/rules.py`: forward test (any day, 30 days
    ahead, uses forecast inputs), backward test (1st of month, prior 12 months, 2027
    floor), earliest-date combination, exclusions of out-of-scope / excluded / flagged lines.
-*Note (REG-DEC-023): batches with rejected rows must make the threshold conclusion show as incomplete, not "below threshold", until the rows are resolved or ruled out of scope.*
+*Note (REG-DEC-023): batches with rejected rows must make the threshold conclusion show as incomplete, not "below threshold", until the rows are resolved or ruled out of scope. This includes rows rejected for FILE conflicts (`LINE_CONFLICT_IN_FILE`, `DECLARATION_FACTS_CONFLICT`, `SOURCE_CONFLICTS_WITH_CORRECTION`, `OLDER_EXTRACT_CONFLICT`): rejecting both rows of a conflict can drop a genuine line from a total, so those rows must be listed for human resolution.*
 2. - [ ] Minimal forecast input (expected tax point + value + source) to feed the forward test
    (full versioned register is R1-037 in Phase 10).
 3. - [ ] `threshold_snapshots` + `threshold_events` with decision IDs; snapshot stores the

@@ -253,7 +253,7 @@ def test_imp_10_r1_025_500_rows_with_37_bad_rows_report_each_and_valid_rows_cont
     }
     assert scalar(app_engine, tenant, "select count(*) from cbam.source_rows") == 500
     with tenant_session(app_engine, tenant_id=tenant) as s:
-        # no tax point, decision or normalised line exists yet (Phase 3 step 4 and Phase 4)
+        # no tax point or decision exists (Phase 4); lines are checked in test_import_lines.py
         assert s.execute(text("select count(*) from cbam.decisions")).scalar_one() == 0
         assert (
             s.execute(
@@ -305,7 +305,7 @@ def test_imp_10_r1_025_audit_has_one_event_per_chunk_and_no_cell_values(
     assert [c["rows"] for c in chunks] == [100, 100, 50]
     assert chunks[-1]["rows_total"] == 250
     statuses = [e.after["status"] for e in events if e.action == "import_batch.status_changed"]
-    assert statuses == ["queued", "parsing", "validating", "completed"]
+    assert statuses == ["queued", "parsing", "validating", "normalising", "completed"]
     for sentinel in ("SENTINEL", "a.csv", "GB123456789012", "1234.56"):
         assert sentinel not in everything, sentinel
     with tenant_session(app_engine, tenant_id=tenant) as s:
@@ -417,6 +417,11 @@ LAYOUT_V2 = """report_type,column_name,maps_to,required,date_format
 import_item,Commodity Code,line.commodity_code,true,
 import_item,Net Mass,line.net_mass_kg,true,
 import_item,Accepted,declaration.acceptance_date,true,%Y-%m-%d
+import_item,Ref,declaration.mrn,true,
+import_item,Item,line.item_no,true,
+import_item,Value,line.customs_value,true,
+import_item,Ccy,line.customs_value_currency,true,
+import_item,Origin,line.origin_country,true,
 """
 
 
@@ -441,7 +446,8 @@ def test_imp_12_r1_025_a_new_activated_layout_version_needs_no_code_change(
     put_source_in_force(app_engine, layout, "LAYOUT-V2-SOURCE")
     activate(app_engine, layout, "cds_report_layouts", "synthetic.2")
     data = (
-        b"Commodity Code,Net Mass,Accepted,Other\n7208100000,1.5,2027-01-05,x\n72,2,2027-13-45,y\n"
+        b"Commodity Code,Net Mass,Accepted,Ref,Item,Value,Ccy,Origin,Other\n"
+        b"7208100000,1.5,2027-01-05,R1,1,10.5,GBP,DE,x\n72,2,2027-13-45,R1,2,10.5,GBP,DE,y\n"
     )
     new = receive(app_engine, store, tenant, data)
     assert run(app_engine, store, tenant, new.id) == "completed_with_errors"
@@ -573,7 +579,15 @@ def test_imp_14_r1_003_the_same_rows_inserted_twice_are_ignored(
     # chunk() refuses a finished batch outright; a live one ignores rows already stored
     assert (
         processing._chunk(
-            app_engine, CLOCK, tenant, batch.id, tuple(HEADERS), match, [(1, good_row(1))]
+            app_engine,
+            CLOCK,
+            tenant,
+            batch.id,
+            tuple(HEADERS),
+            match,
+            [(1, good_row(1))],
+            processing._Lease(),
+            300,
         )
         == 0
     )
@@ -1398,22 +1412,23 @@ def test_imp_18_r1_003_a_batch_started_too_many_times_is_failed_as_a_crash_loop(
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
     batch = receive(app_engine, store, tenant, to_csv([good_row(i) for i in range(1, 8)]))
 
-    def crash(_rows: int) -> None:
-        raise RuntimeError("killed")
-
-    for attempt in (1, 2, 3):
-        with pytest.raises(ImportJobError):
+    for attempt, minute in ((1, 0), (2, 10), (3, 20)):  # a worker lost each time: no cleanup runs
+        with pytest.raises(Killed):
             run(
                 app_engine,
                 store,
                 tenant,
                 batch.id,
+                clock=at(minute),
                 chunk_rows=2,
-                after_chunk=crash,
+                after_chunk=kill,
                 limits=limits(max_attempts=3),
             )
         assert batch_row(app_engine, tenant, batch.id).attempts == attempt
-    assert run(app_engine, store, tenant, batch.id, limits=limits(max_attempts=3)) == "failed"
+    assert (
+        run(app_engine, store, tenant, batch.id, clock=at(30), limits=limits(max_attempts=3))
+        == "failed"
+    )
     row = batch_row(app_engine, tenant, batch.id)
     assert (row.status, row.failure_reason) == ("failed", "worker_crash_loop")
     assert run(app_engine, store, tenant, batch.id) == "failed"  # and stays stopped
@@ -1523,7 +1538,10 @@ def test_imp_19_r1_025_the_layout_is_chosen_for_the_date_the_report_was_acquired
     put_source_in_force(app_engine, layout, "LAYOUT-V4-SOURCE")
     activate(app_engine, layout, "cds_report_layouts", "synthetic.4")
     tenant, store = make_tenant(app_engine, "A"), InMemoryStore()
-    data = b"Commodity Code,Net Mass,Accepted\n7208100000,1.5,2027-01-05\n"
+    data = (
+        b"Commodity Code,Net Mass,Accepted,Ref,Item,Value,Ccy,Origin\n"
+        b"7208100000,1.5,2027-01-05,R1,1,10.5,GBP,DE\n"
+    )
     late = FrozenClock(datetime(2027, 9, 1, 9, 0, tzinfo=UTC))
 
     def meta(day: date) -> ImportBatchMetadata:
@@ -1832,7 +1850,8 @@ def test_imp_22_r1_003_a_failed_attempt_releases_the_lease_so_a_retry_can_start_
     with pytest.raises(ImportJobError):
         run(app_engine, store, tenant, batch.id, chunk_rows=2, after_chunk=boom)
     assert run(app_engine, store, tenant, batch.id, chunk_rows=2) == "completed"  # same instant
-    assert batch_row(app_engine, tenant, batch.id).attempts == 2
+    # a handled failure is not a lost worker: the retry is not counted as a takeover
+    assert batch_row(app_engine, tenant, batch.id).attempts == 1
 
 
 def test_imp_22_r1_003_attempts_can_never_go_down_but_the_lease_can_move_either_way(

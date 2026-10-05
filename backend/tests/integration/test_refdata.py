@@ -27,6 +27,7 @@ from app.modules.refdata.datasets import DATASETS
 from app.modules.refdata.load import load_dataset
 from app.modules.refdata.service import Actor, AffectedItem
 from tests.integration.conftest import make_user
+from tests.integration.refdata_setup import IMPORT_TABLES
 from tests.refdata_helpers import CODES_V1, FIXTURES, write_dataset
 
 NOW = datetime(2027, 3, 1, 9, 0, tzinfo=UTC)
@@ -48,7 +49,7 @@ def clean(admin_engine: Engine) -> Iterator[None]:
     with admin_engine.begin() as conn:
         conn.execute(text("set local role cbam_owner"))
         # batches that used a layout version point at it, so they go first
-        for table in ("row_exceptions", "source_rows", "import_batches", *ALL_TABLES):
+        for table in (*IMPORT_TABLES, *ALL_TABLES):
             conn.execute(text(f"alter table cbam.{table} disable trigger user"))
             conn.execute(text(f"alter table cbam.{table} no force row level security"))
             conn.execute(text(f"delete from cbam.{table}"))  # noqa: S608

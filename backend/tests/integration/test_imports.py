@@ -306,6 +306,10 @@ def test_r1_003_future_acquisition_date_and_missing_file_are_422(
     t = make_tenant(app_engine)
     user = _user(app_engine, t)
     assert _upload(client, t, user, meta={**META, "acquired_on": "2027-03-02"}).status_code == 422
+    future_end = {**META, "window_end": "2027-03-02", "acquired_on": "2027-03-01"}
+    assert _upload(client, t, user, meta=future_end).status_code == 422  # recency input
+    future_start = {**META, "window_start": "2027-03-02", "window_end": "2027-03-03"}
+    assert _upload(client, t, user, meta=future_start).status_code == 422
     r = client.post(_url(t), data=META, files={"other": ("x.csv", CSV)}, headers=_h(user))
     assert r.status_code == 422
     r = client.post(_url(t), json=META, headers=_h(user))

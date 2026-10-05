@@ -6,23 +6,29 @@ the tables and writes one audit event of counts, so a crash loses at most the op
 a retry resumes after the last committed row. Every insert is `on conflict do nothing`; the
 counters are recounted, never incremented: running the same work twice changes nothing.
 
-Only format and presence are checked here. Nothing is decided about scope, tax point or the
-threshold, and nothing is normalised into declarations or lines yet (Phase 3 step 4).
+Only format and presence are checked while reading. Rows without an error exception are then
+normalised into declarations and lines (`normalisation.py`, Phase 3 step 4) in the `normalising`
+state, also in resumable chunks. Nothing is decided about scope, tax point or the threshold.
 Neither a cell value nor a filename is ever written to an audit event, a log line, an
 exception message or a failure reason.
+
+The job holds a lease: a token (`lease_owner`) and an expiry. Only the holder renews or releases
+it. A job that finds another token (it was taken over) stops without touching the batch. The
+row-size limit (`IMPORT_MAX_ROW_CHARS`) applies to the raw CSV record as read, before any trimming.
 """
 
 import csv
 import io
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from functools import partial
 from typing import Any
 from uuid import UUID
 
 import structlog
-from sqlalchemy import Engine, func, select, text
+from sqlalchemy import Engine, and_, func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -35,10 +41,12 @@ from app.core.errors import StorageError, TenantMismatchError
 from app.core.ids import uuid7
 from app.core.storage import ObjectStore
 from app.core.versioning import update_versioned
-from app.modules.imports import rules
+from app.modules.imports import normalisation, rules
 from app.modules.imports.models import (
     document_versions,
     import_batches,
+    import_line_sources,
+    import_lines,
     row_exceptions,
     source_rows,
 )
@@ -50,6 +58,20 @@ JOB = Actor("job", None)
 LAYOUT_DATASET = "cds_report_layouts"
 
 log = structlog.get_logger()
+
+
+class LeaseLostError(RuntimeError):
+    """Another worker took the batch over: this job must stop and leave the batch alone."""
+
+
+@dataclass
+class _Lease:
+    """This run's claim on the batch. `taken` is true once the takeover was written; the token
+    is what the database row must still hold for the claim to be ours."""
+
+    token: UUID = field(default_factory=uuid7)
+    taken: bool = False
+    last_renewed: datetime | None = None
 
 
 class ImportJobError(RuntimeError):
@@ -73,6 +95,7 @@ def limits_from_settings(settings: Settings | None = None) -> rules.ImportLimits
         chunk_max_chars=cfg.import_chunk_max_bytes,
         max_attempts=cfg.import_max_attempts,
         lease_seconds=cfg.import_lease_seconds,
+        retry_margin_seconds=cfg.import_retry_margin_seconds,
     )
 
 
@@ -112,6 +135,7 @@ class _Start:
     scan_state: str
     attempts: int
     lease_expires_at: datetime | None
+    lease_owner: UUID | None
 
 
 def process_batch(
@@ -124,14 +148,23 @@ def process_batch(
     chunk_rows: int = CHUNK_ROWS,
     final_attempt: bool = False,
     after_chunk: Callable[[int], None] | None = None,
+    after_normalise_chunk: Callable[[int], None] | None = None,
     limits: rules.ImportLimits | None = None,
+    release_delay_seconds: int = 0,
 ) -> str:
     """Process (or resume) a batch; returns its status. A finished batch is a no-op.
 
     Failures raise ImportJobError so the caller can retry with backoff. With
     `final_attempt=True` the batch is also marked `failed` with a short code first.
-    `after_chunk(rows_in_chunk)` runs after each committed chunk (tests use it to crash).
+    `after_chunk(rows_in_chunk)` runs after each committed read chunk and
+    `after_normalise_chunk(rows)` after each committed normalising chunk (tests use them to
+    crash). After a handled failure the lease is released to expire `release_delay_seconds`
+    from now (the caller's retry back-off), so the sweeper and the retry do not both take over.
     """
+    lease = _Lease()
+    lim = limits or limits_from_settings()
+    # A back-off of zero means "retry at once"; any other gets a margin for an early retry.
+    hold = release_delay_seconds + (lim.retry_margin_seconds if release_delay_seconds > 0 else 0)
     try:
         return _run(
             engine,
@@ -141,15 +174,34 @@ def process_batch(
             batch_id,
             chunk_rows,
             after_chunk,
-            limits or limits_from_settings(),
+            after_normalise_chunk,
+            lim,
+            lease,
         )
+    except LeaseLostError:
+        # Someone else owns the batch now: leave it (and its lease) alone.
+        return _status(engine, tenant_id, batch_id)
     except Exception as exc:
-        _release_lease(engine, clock, tenant_id, batch_id)  # so a retry can take over at once
+        if lease.taken:  # only release a lease this run actually took
+            _release_lease(engine, clock, tenant_id, batch_id, lease, hold)
         permanent = isinstance(exc, TenantMismatchError)
         if final_attempt or permanent:
             code = "storage_unavailable" if isinstance(exc, StorageError) else "processing_error"
             _mark_failed(engine, clock, tenant_id, batch_id, code)
         raise ImportJobError(type(exc).__name__, permanent=permanent) from None
+
+
+def _require_lease(session: Session, tenant_id: UUID, batch_id: UUID, lease: _Lease) -> None:
+    """Stop unless this run still holds the batch's lease (a finished batch is left to the
+    caller, which returns its final status)."""
+    current = _batch(session, tenant_id, batch_id)
+    if current.status not in rules.TERMINAL_STATES and current.lease_owner != lease.token:
+        raise LeaseLostError()
+
+
+def _status(engine: Engine, tenant_id: UUID, batch_id: UUID) -> str:
+    with tenant_session(engine, tenant_id=tenant_id) as s:
+        return str(_batch(s, tenant_id, batch_id).status)
 
 
 def _lock(session: Session, tenant_id: UUID, batch_id: UUID) -> None:
@@ -198,21 +250,61 @@ def _advance(
     )
 
 
-def _release_lease(engine: Engine, clock: Clock, tenant_id: UUID, batch_id: UUID) -> None:
+def _release_lease(
+    engine: Engine, clock: Clock, tenant_id: UUID, batch_id: UUID, lease: _Lease, delay_seconds: int
+) -> None:
+    """Hand the lease back after a handled failure: no owner, expiring after the retry
+    back-off. A clean release is not a lost worker, so the next start does not count an attempt.
+    Does nothing unless the batch still carries THIS run's token."""
     try:
         with tenant_session(engine, tenant_id=tenant_id) as s:
             _lock(s, tenant_id, batch_id)
             current = _batch(s, tenant_id, batch_id)
-            if current.status not in rules.TERMINAL_STATES:
+            if current.status not in rules.TERMINAL_STATES and current.lease_owner == lease.token:
                 update_versioned(
                     s,
                     "import_batches",
                     row_id=batch_id,
                     expected_version=current.row_version,
-                    values={"lease_expires_at": clock.now()},
+                    values={
+                        "lease_expires_at": clock.now() + timedelta(seconds=delay_seconds),
+                        "lease_owner": None,
+                    },
                 )
     except Exception as exc:  # best effort: the lease then simply expires on its own
         log.error("import_release_lease_error", batch_id=str(batch_id), error=type(exc).__name__)
+
+
+def _renew(
+    engine: Engine, clock: Clock, tenant_id: UUID, batch_id: UUID, lease: _Lease, seconds: int
+) -> None:
+    """Extend the lease if it is still ours; raises LeaseLostError if another job holds it."""
+    now = clock.now()
+    with tenant_session(engine, tenant_id=tenant_id) as s:
+        _lock(s, tenant_id, batch_id)
+        current = _batch(s, tenant_id, batch_id)
+        if current.status in rules.TERMINAL_STATES:
+            return
+        if current.lease_owner != lease.token:
+            raise LeaseLostError()
+        update_versioned(
+            s,
+            "import_batches",
+            row_id=batch_id,
+            expected_version=current.row_version,
+            values={"lease_expires_at": now + timedelta(seconds=seconds)},
+        )
+    lease.last_renewed = now
+
+
+def _renew_if_due(
+    engine: Engine, clock: Clock, tenant_id: UUID, batch_id: UUID, lease: _Lease, seconds: int
+) -> None:
+    """Renew once a third of the lease has passed since the last renewal, so a long read that
+    commits nothing (skipping rows already saved, reading the header) cannot outlive it."""
+    last = lease.last_renewed
+    if last is None or clock.now() - last >= timedelta(seconds=seconds / 3):
+        _renew(engine, clock, tenant_id, batch_id, lease, seconds)
 
 
 def _mark_failed(engine: Engine, clock: Clock, tenant_id: UUID, batch_id: UUID, code: str) -> None:
@@ -252,6 +344,7 @@ def _load_start(session: Session, tenant_id: UUID, batch_id: UUID) -> _Start:
         version.scan_state,
         int(row.attempts),
         row.lease_expires_at,
+        row.lease_owner,
     )
 
 
@@ -263,8 +356,11 @@ def _run(
     batch_id: UUID,
     chunk_rows: int,
     after_chunk: Callable[[int], None] | None,
+    after_normalise_chunk: Callable[[int], None] | None,
     limits: rules.ImportLimits,
+    lease: _Lease,
 ) -> str:
+    reject = partial(_reject, lease=lease)
     with tenant_session(engine, tenant_id=tenant_id) as s:
         _lock(s, tenant_id, batch_id)
         start = _load_start(s, tenant_id, batch_id)
@@ -279,8 +375,12 @@ def _run(
             # Another worker holds a fresh lease: a duplicate delivery does nothing and is
             # not counted as an attempt.
             return str(start.status)
-        # A first start or a takeover of an expired lease is an attempt. A worker that keeps
-        # dying mid-file must not be taken over forever (crash-loop guard).
+        # A first start or a takeover of a LOST worker's lease is an attempt. A lease handed
+        # back after a handled failure (no owner, but an expiry) is not: that failure is bounded
+        # by the task's retry limit. A worker that keeps dying mid-file must not be taken over
+        # forever (crash-loop guard).
+        released_cleanly = start.lease_owner is None and start.lease_expires_at is not None
+        attempts = start.attempts + (0 if released_cleanly else 1)
         current = _batch(s, tenant_id, batch_id)
         update_versioned(
             s,
@@ -288,25 +388,28 @@ def _run(
             row_id=batch_id,
             expected_version=current.row_version,
             values={
-                "attempts": start.attempts + 1,
+                "attempts": attempts,
                 "lease_expires_at": now + timedelta(seconds=limits.lease_seconds),
+                "lease_owner": lease.token,
             },
         )
-        if start.attempts + 1 > limits.max_attempts:
+        lease.taken = True
+        lease.last_renewed = now
+        if attempts > limits.max_attempts:
             _advance(s, clock, tenant_id, batch_id, "failed", failure_reason="worker_crash_loop")
-            log.error("import_crash_loop", batch_id=str(batch_id), attempts=start.attempts + 1)
+            log.error("import_crash_loop", batch_id=str(batch_id), attempts=attempts)
             return "failed"
         _advance(s, clock, tenant_id, batch_id, "queued")
         _advance(s, clock, tenant_id, batch_id, "parsing")
     if start.scan_state == "infected":  # 'pending' proceeds until Phase 7 gates on 'clean'
-        return _reject(engine, clock, tenant_id, batch_id, [rules.Issue("FILE_INFECTED", "")], None)
+        return reject(engine, clock, tenant_id, batch_id, [rules.Issue("FILE_INFECTED", "")], None)
 
     with _field_limit(limits.max_cell_chars), store.open(start.storage_key) as binary:
         text_io = io.TextIOWrapper(binary, encoding="utf-8-sig", newline="")
         reader = csv.reader(_bounded_lines(text_io, limits))
         header, problem = _read_header(reader, limits)
         if header is None:
-            return _reject(
+            return reject(
                 engine,
                 clock,
                 tenant_id,
@@ -316,14 +419,15 @@ def _run(
             )
         too_big = rules.header_problem(header, limits)
         if too_big:
-            return _reject(
+            return reject(
                 engine, clock, tenant_id, batch_id, [rules.Issue(too_big, "")], "unreadable"
             )
         headers = rules.raw_headers(header)
-        match_or_status = _prepare(engine, clock, tenant_id, batch_id, start, headers)
+        match_or_status = _prepare(engine, clock, tenant_id, batch_id, start, headers, lease)
         if isinstance(match_or_status, str):
             return match_or_status
         match = match_or_status
+        _renew(engine, clock, tenant_id, batch_id, lease, limits.lease_seconds)
         stopped = _stream_rows(
             engine,
             clock,
@@ -336,15 +440,29 @@ def _run(
             chunk_rows,
             after_chunk,
             limits,
+            lease,
         )
         text_io.detach()
 
     if stopped:
         # Rows saved before the problem stay (raw rows are never deleted) with their counters;
         # the batch is rejected and a corrected file makes a new batch.
-        return _reject(engine, clock, tenant_id, batch_id, [rules.Issue(stopped, "")], None)
+        return reject(engine, clock, tenant_id, batch_id, [rules.Issue(stopped, "")], None)
+    if start.report_type == "import_item":  # other reports are joined by the adapter (step 8a)
+        _normalise(
+            engine,
+            clock,
+            tenant_id,
+            batch_id,
+            match,
+            chunk_rows,
+            after_normalise_chunk,
+            limits,
+            lease,
+        )
     with tenant_session(engine, tenant_id=tenant_id) as s:
         _lock(s, tenant_id, batch_id)
+        _require_lease(s, tenant_id, batch_id, lease)
         counters = _recount(s, tenant_id, batch_id)
         target = "completed_with_errors" if counters["rows_rejected"] else "completed"
         _advance(s, clock, tenant_id, batch_id, target, progress=counters)
@@ -389,7 +507,8 @@ def _insert_exceptions(
     batch_id: UUID,
     now: datetime,
     items: list[tuple[int, UUID | None, rules.Issue]],
-) -> None:
+) -> int:
+    """Insert the exceptions that are not already there; returns how many were new."""
     values: dict[tuple[int, str, str], dict[str, Any]] = {}
     for number, source_row_id, issue in items:
         values[(number, issue.field, issue.code)] = {
@@ -406,12 +525,15 @@ def _insert_exceptions(
             "row_version": 1,
             "created_at": now,
         }
-    if values:
-        session.execute(
-            pg_insert(row_exceptions)
-            .values(list(values.values()))
-            .on_conflict_do_nothing(index_elements=["batch_id", "row_number", "field", "code"])
-        )
+    if not values:
+        return 0
+    result = session.execute(
+        pg_insert(row_exceptions)
+        .values(list(values.values()))
+        .on_conflict_do_nothing(index_elements=["batch_id", "row_number", "field", "code"])
+        .returning(row_exceptions.c.id)
+    )
+    return len(result.all())
 
 
 def _reject(
@@ -421,13 +543,17 @@ def _reject(
     batch_id: UUID,
     issues: list[rules.Issue],
     layout_status: str | None,
+    lease: _Lease | None = None,
 ) -> str:
-    """Reject the whole file: file-level exceptions (row 0) and the `rejected` status, together."""
+    """Reject the whole file: file-level exceptions (row 0) and the `rejected` status, together.
+    Given a lease, it is only done by the job that still holds it."""
     with tenant_session(engine, tenant_id=tenant_id) as s:
         _lock(s, tenant_id, batch_id)
         current = _batch(s, tenant_id, batch_id)
         if current.status in rules.TERMINAL_STATES:
             return str(current.status)  # lost a race: the batch already has its final state
+        if lease is not None and current.lease_owner != lease.token:
+            raise LeaseLostError()
         _insert_exceptions(
             s,
             tenant_id=tenant_id,
@@ -458,12 +584,14 @@ def _prepare(
     batch_id: UUID,
     start: _Start,
     headers: tuple[str, ...],
+    lease: _Lease,
 ) -> rules.LayoutMatch | str:
     """Choose the layout and check the headings; returns the match or the rejected status.
 
     A new batch uses the layout version active today. A batch being resumed keeps the version
     it started with, so a layout activated mid-file cannot change how later rows are read.
     """
+    reject = partial(_reject, lease=lease)
     as_of = start.layout_date
     with tenant_session(engine, tenant_id=tenant_id) as s:
         if start.layout_version_id is not None:
@@ -478,12 +606,12 @@ def _prepare(
             ]
             version_id = rows[0]["dataset_version_id"] if rows else None
     if start.report_type is None and start.layout_version_id is None:
-        return _reject(
+        return reject(
             engine, clock, tenant_id, batch_id, [rules.Issue("REPORT_TYPE_MISSING", "")], None
         )
     columns = rules.layout_columns(rows, start.report_type or "")
     if version_id is None or not columns:
-        return _reject(
+        return reject(
             engine,
             clock,
             tenant_id,
@@ -492,19 +620,24 @@ def _prepare(
             "not_active",
         )
     if rules.layout_is_invalid(columns):
-        return _reject(
+        return reject(
             engine, clock, tenant_id, batch_id, [rules.Issue("LAYOUT_INVALID", "")], "invalid"
         )
     match = rules.match_layout(headers, columns)
     if match.duplicate_headers:
-        return _reject(
+        return reject(
             engine, clock, tenant_id, batch_id, [rules.Issue("HEADER_DUPLICATE", "")], "unreadable"
         )
     if match.missing_required:
         issues = [rules.Issue("COLUMN_MISSING", name) for name in match.missing_required]
-        return _reject(engine, clock, tenant_id, batch_id, issues, "columns_missing")
+        return reject(engine, clock, tenant_id, batch_id, issues, "columns_missing")
+    unmapped = rules.missing_line_fields(match) if start.report_type == "import_item" else ()
+    if unmapped:
+        issues = [rules.Issue("COLUMN_MISSING", name) for name in unmapped]
+        return reject(engine, clock, tenant_id, batch_id, issues, "columns_missing")
     with tenant_session(engine, tenant_id=tenant_id) as s:
         _lock(s, tenant_id, batch_id)
+        _require_lease(s, tenant_id, batch_id, lease)
         _advance(
             s,
             clock,
@@ -528,6 +661,7 @@ def _stream_rows(
     chunk_rows: int,
     after_chunk: Callable[[int], None] | None,
     limits: rules.ImportLimits,
+    lease: _Lease,
 ) -> str | None:
     """Feed the data rows to `_chunk`, 500 rows or `chunk_max_chars` at a time, whichever
     comes first. Returns a file-level stop code if the file stopped being readable.
@@ -539,7 +673,7 @@ def _stream_rows(
 
     def flush() -> None:
         written = _chunk(
-            engine, clock, tenant_id, batch_id, headers, match, buffer, limits.lease_seconds
+            engine, clock, tenant_id, batch_id, headers, match, buffer, lease, limits.lease_seconds
         )
         buffer.clear()
         if after_chunk is not None:
@@ -551,6 +685,8 @@ def _stream_rows(
             break
         number += 1
         if number <= resume_from:
+            # Skipping rows already saved commits nothing, so renew on a time basis.
+            _renew_if_due(engine, clock, tenant_id, batch_id, lease, limits.lease_seconds)
             continue
         buffer.append((number, cells))
         buffered_chars += rules.row_chars(cells)
@@ -577,11 +713,35 @@ def _recount(session: Session, tenant_id: UUID, batch_id: UUID) -> dict[str, int
             row_exceptions.c.row_number > 0,
         )
     ).scalar_one()
+    created = session.execute(
+        select(func.count()).where(
+            import_lines.c.tenant_id == tenant_id, import_lines.c.batch_id == batch_id
+        )
+    ).scalar_one()
+    unchanged = session.execute(
+        select(func.count())
+        .select_from(
+            import_line_sources.join(
+                source_rows,
+                and_(
+                    source_rows.c.tenant_id == import_line_sources.c.tenant_id,
+                    source_rows.c.id == import_line_sources.c.source_row_id,
+                ),
+            )
+        )
+        .where(
+            import_line_sources.c.tenant_id == tenant_id,
+            source_rows.c.batch_id == batch_id,
+            import_line_sources.c.role == "duplicate_seen",
+        )
+    ).scalar_one()
     return {
         "rows_total": int(total),
         "rows_processed": int(total),
         "rows_valid": int(total) - int(rejected),
         "rows_rejected": int(rejected),
+        "lines_created": int(created),
+        "lines_unchanged": int(unchanged),
     }
 
 
@@ -593,7 +753,8 @@ def _chunk(
     headers: tuple[str, ...],
     match: rules.LayoutMatch,
     buffer: list[tuple[int, list[str]]],
-    lease_seconds: int = 300,
+    lease: _Lease,
+    lease_seconds: int,
 ) -> int:
     """One transaction: raw rows, exceptions, counters, one audit event. Returns rows written."""
     now = clock.now()
@@ -602,6 +763,8 @@ def _chunk(
         current = _batch(s, tenant_id, batch_id)
         if current.status in rules.TERMINAL_STATES:
             return 0
+        if current.lease_owner != lease.token:
+            raise LeaseLostError()
         planned: dict[int, tuple[UUID, list[rules.Issue]]] = {}
         values: list[dict[str, Any]] = []
         for number, cells in buffer:
@@ -644,6 +807,7 @@ def _chunk(
             expected_version=current.row_version,
             values={**counters, "lease_expires_at": now + timedelta(seconds=lease_seconds)},
         )
+        lease.last_renewed = now
         by_code: dict[str, int] = {}
         for _, _, issue in items:
             by_code[issue.code] = by_code.get(issue.code, 0) + 1
@@ -668,3 +832,129 @@ def _chunk(
             },
         )
         return len(inserted)
+
+
+def _add_exceptions(
+    tenant_id: UUID,
+    batch_id: UUID,
+    now: datetime,
+    session: Session,
+    items: list[tuple[int, UUID | None, rules.Issue]],
+) -> None:
+    _insert_exceptions(session, tenant_id=tenant_id, batch_id=batch_id, now=now, items=items)
+
+
+def _reject_file_conflicts(
+    engine: Engine,
+    clock: Clock,
+    tenant_id: UUID,
+    batch_id: UUID,
+    match: rules.LayoutMatch,
+    ctx: rules.NormalisationContext,
+    limits: rules.ImportLimits,
+    lease: _Lease,
+) -> None:
+    """Pre-pass: rows of this file that disagree with each other about one key are ALL rejected
+    before any of them is normalised. Re-runnable: a rerun finds the same rows."""
+    now = clock.now()
+    with tenant_session(engine, tenant_id=tenant_id) as s:
+        _lock(s, tenant_id, batch_id)
+        current = _batch(s, tenant_id, batch_id)
+        if current.status in rules.TERMINAL_STATES:
+            return
+        if current.lease_owner != lease.token:
+            raise LeaseLostError()
+        found = normalisation.find_file_conflicts(s, tenant_id, batch_id, match, ctx)
+        added = (
+            _insert_exceptions(s, tenant_id=tenant_id, batch_id=batch_id, now=now, items=found)
+            if found
+            else 0
+        )
+        if added:  # a rerun finds the same rows, adds nothing and writes no second event
+            record(
+                s,
+                tenant_id=tenant_id,
+                actor_type="job",
+                actor_id=None,
+                action="import_batch.file_conflicts_found",
+                object_type="import_batch",
+                object_id=batch_id,
+                occurred_at=now,
+                after={"rows": len({n for n, _, _ in found})},
+            )
+        update_versioned(
+            s,
+            "import_batches",
+            row_id=batch_id,
+            expected_version=current.row_version,
+            values={
+                **_recount(s, tenant_id, batch_id),
+                "lease_expires_at": now + timedelta(seconds=limits.lease_seconds),
+            },
+        )
+    lease.last_renewed = now
+
+
+def _normalise(
+    engine: Engine,
+    clock: Clock,
+    tenant_id: UUID,
+    batch_id: UUID,
+    match: rules.LayoutMatch,
+    chunk_rows: int,
+    after_chunk: Callable[[int], None] | None,
+    limits: rules.ImportLimits,
+    lease: _Lease,
+) -> None:
+    """The `normalising` pass: rows with no error exception become declarations and lines, one
+    chunk per transaction. Resumable and idempotent: a row is done once it has a source link or
+    an error exception, and the counters are recounted from the tables."""
+    with tenant_session(engine, tenant_id=tenant_id) as s:
+        _lock(s, tenant_id, batch_id)
+        _advance(s, clock, tenant_id, batch_id, "normalising")
+        batch = _batch(s, tenant_id, batch_id)
+        ctx = rules.NormalisationContext(
+            batch_eori=batch.eori, entry_method=rules.entry_method_for(batch.acquisition_method)
+        )
+        report_type = str(batch.cds_report_type)
+        # The date of the report decides which of two different versions is newer.
+        recency = batch.acquired_on or batch.window_end or uk_date(batch.created_at)
+    _reject_file_conflicts(engine, clock, tenant_id, batch_id, match, ctx, limits, lease)
+    size = max(1, min(chunk_rows, normalisation.NORMALISE_CHUNK_ROWS))
+    while True:
+        now = clock.now()
+        with tenant_session(engine, tenant_id=tenant_id) as s:
+            _lock(s, tenant_id, batch_id)
+            current = _batch(s, tenant_id, batch_id)
+            if current.status in rules.TERMINAL_STATES:
+                return
+            if current.lease_owner != lease.token:
+                raise LeaseLostError()
+            rows = normalisation.pending_rows(s, tenant_id, batch_id, size)
+            if not rows:
+                return
+            normalisation.normalise_chunk(
+                s,
+                tenant_id=tenant_id,
+                batch_id=batch_id,
+                report_type=report_type,
+                rows=rows,
+                match=match,
+                ctx=ctx,
+                recency=recency,
+                now=now,
+                add_exceptions=partial(_add_exceptions, tenant_id, batch_id, now),
+            )
+            update_versioned(
+                s,
+                "import_batches",
+                row_id=batch_id,
+                expected_version=current.row_version,
+                values={
+                    **_recount(s, tenant_id, batch_id),
+                    "lease_expires_at": now + timedelta(seconds=limits.lease_seconds),
+                },
+            )
+            lease.last_renewed = now
+        if after_chunk is not None:
+            after_chunk(len(rows))
