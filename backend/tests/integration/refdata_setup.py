@@ -19,7 +19,15 @@ from app.modules.refdata.service import Actor
 from tests.integration.conftest import make_user
 
 NOW = datetime(2027, 3, 1, 9, 0, tzinfo=UTC)
-IMPORT_TABLES = ["row_exceptions", "source_rows", "import_batches"]
+IMPORT_TABLES = [
+    "import_line_sources",
+    "import_lines",
+    "declarations",
+    "parties",
+    "row_exceptions",
+    "source_rows",
+    "import_batches",
+]
 REF_TABLES = [
     *(f"ref_{name}" for name in DATASETS),
     "ref_dataset_versions",

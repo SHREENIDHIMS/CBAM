@@ -88,3 +88,37 @@ def test_0009_import_tables_are_removed_by_downgrade_and_come_back(
     assert _scalar(functions) == 0
     command.upgrade(cfg, "head")
     assert _scalar(count) == 3
+
+
+def test_0011_import_lines_and_the_impact_function_are_removed_by_downgrade_and_come_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R1-005: migration 0011 has a working downgrade (tables, functions, lease_owner)."""
+    cfg = _config(monkeypatch)
+    cfg.set_main_option("script_location", str(BACKEND / "migrations"))
+    command.upgrade(cfg, "head")
+    tables = (
+        "select count(*) from information_schema.tables where table_schema = 'cbam' "
+        "and table_name in ('parties','declarations','import_lines','import_line_sources')"
+    )
+    column = (
+        "select count(*) from information_schema.columns where table_schema = 'cbam' "
+        "and table_name = 'import_batches' and column_name = 'lease_owner'"
+    )
+    functions = (
+        "select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace "
+        "where n.nspname = 'cbam' and p.proname in ('impact_line_counts_by_code_prefix', "
+        "'import_facts_block_change', 'declarations_check_chain', 'import_lines_check_chain')"
+    )
+    assert (_scalar(tables), _scalar(column), _scalar(functions)) == (4, 1, 4)
+    command.downgrade(cfg, "0010")
+    assert (_scalar(tables), _scalar(column), _scalar(functions)) == (0, 0, 0)
+    assert _scalar("select count(*) from cbam.source_rows") is not None  # 0010 is intact
+    command.upgrade(cfg, "head")
+    assert (_scalar(tables), _scalar(column), _scalar(functions)) == (4, 1, 4)
+    forced = (
+        "select count(*) from pg_class where relnamespace = 'cbam'::regnamespace and relname in "
+        "('parties','declarations','import_lines','import_line_sources') "
+        "and relrowsecurity and relforcerowsecurity"
+    )
+    assert _scalar(forced) == 4

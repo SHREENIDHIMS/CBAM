@@ -1,0 +1,262 @@
+"""Parties, declarations, import lines and their lineage; the job lease owner (R1-005, R1-010).
+
+Revision ID: 0011
+Revises: 0010
+
+Normalised customs facts, with lineage back to the raw row (CLAUDE.md rule 4). Every table is
+append-only: UPDATE, DELETE and TRUNCATE are revoked from `cbam_app` and blocked by a trigger for
+every role including the owner. A correction is a NEW version whose `supersedes_id` points at the
+old one (unique, so a version has one successor); a trigger checks the chain.
+
+None of these tables holds a tax point, scope, quarter or threshold: `acceptance_date` is the date
+the report gave and is NOT a tax point (CLAUDE.md rule 3; that is Phase 4). Customs value is kept
+as declared (`customs_value_source` + currency); `customs_value_gbp` is only set when the currency
+is GBP (no FX here: R1-035 is Phase 10). `value_source` records how the value was derived
+(R1-010); anything other than `declared` must carry a `value_override_reason`.
+
+`cbam.impact_line_counts_by_code_prefix` is the platform's first cross-tenant code path: a
+SECURITY DEFINER function that returns COUNTS of current lines per tenant, nothing else. Forced
+row-level security also applies to the table owner, so the owner role gets a SELECT-only policy
+on `import_lines` for the function to read through; `cbam_app` is not that role.
+
+`import_batches.lease_owner` is the token of the job holding the lease: only that job may renew
+or release it.
+"""
+
+from alembic import op
+
+revision = "0011"
+down_revision = "0010"
+branch_labels = None
+depends_on = None
+
+_TABLES = ("parties", "declarations", "import_lines", "import_line_sources")
+
+_SQL = """
+alter table cbam.import_batches add column lease_owner uuid;
+
+create function cbam.import_facts_block_change() returns trigger language plpgsql as $$
+begin
+  raise exception 'normalised import facts are append-only: a correction is a new version';
+end $$;
+
+create table cbam.parties (
+  id uuid primary key,
+  tenant_id uuid not null references cbam.tenants (id),
+  eori text check (eori ~ '^(GB|XI)[0-9]{12}$'),
+  name text check (length(name) <= 500),        -- a business name can be personal data: never logged
+  created_at timestamptz not null default now(),
+  unique (tenant_id, id)
+);
+create unique index parties_tenant_eori on cbam.parties (tenant_id, eori) where eori is not null;
+
+create table cbam.declarations (
+  id uuid primary key,
+  tenant_id uuid not null references cbam.tenants (id),
+  mrn text not null check (length(mrn) between 1 and 100),
+  version integer not null check (version >= 1),
+  supersedes_id uuid,
+  acceptance_date date not null,               -- as the report gave it: NOT a tax point
+  acceptance_at timestamptz,
+  procedure_code text check (length(procedure_code) <= 20),
+  additional_procedure_codes text[],
+  importer_party_id uuid,
+  declarant_party_id uuid,
+  representative_party_id uuid,
+  representation_type text not null default 'unknown'
+    check (representation_type in ('self','direct','indirect','unknown')),
+  eori_context text check (eori_context in ('GB','XI')),
+  entry_method text not null check (entry_method in ('cds','gcd','manual','correction')),
+  batch_id uuid not null,
+  content_sha256 char(64) not null check (content_sha256 ~ '^[0-9a-f]{64}$'),
+  created_at timestamptz not null default now(),
+  unique (tenant_id, id),
+  unique (tenant_id, mrn, version),
+  unique (supersedes_id),
+  check ((version = 1) = (supersedes_id is null)),
+  foreign key (tenant_id, supersedes_id) references cbam.declarations (tenant_id, id),
+  foreign key (tenant_id, importer_party_id) references cbam.parties (tenant_id, id),
+  foreign key (tenant_id, declarant_party_id) references cbam.parties (tenant_id, id),
+  foreign key (tenant_id, representative_party_id) references cbam.parties (tenant_id, id),
+  foreign key (tenant_id, batch_id) references cbam.import_batches (tenant_id, id)
+);
+create index declarations_tenant_batch on cbam.declarations (tenant_id, batch_id);
+
+create table cbam.import_lines (
+  id uuid primary key,
+  tenant_id uuid not null references cbam.tenants (id),
+  declaration_id uuid not null,
+  item_no integer not null check (item_no >= 1),
+  version integer not null check (version >= 1),
+  supersedes_id uuid,
+  commodity_code text not null check (commodity_code ~ '^[0-9]{8,10}$'),  -- exactly as given
+  description text check (length(description) <= 4096),
+  net_mass_kg numeric(20,6) not null check (net_mass_kg >= 0),
+  supplementary_qty numeric(20,6) check (supplementary_qty >= 0),
+  supplementary_unit text check (length(supplementary_unit) <= 20),
+  customs_value_source numeric(24,8) not null check (customs_value_source >= 0),
+  customs_value_currency char(3) not null check (customs_value_currency ~ '^[A-Z]{3}$'),
+  customs_value_gbp numeric(18,2) check (customs_value_gbp >= 0),   -- only when currency is GBP
+  customs_value_gbp_note text check (customs_value_gbp_note ~ '^[a-z0-9_]{1,64}$'),
+  fx_method text check (fx_method ~ '^[a-z0-9_]{1,64}$'),
+  valuation_basis text check (length(valuation_basis) <= 200),      -- as declared, not interpreted
+  value_source text not null default 'declared'
+    check (value_source in ('declared','manual','correction')),
+  value_override_reason text check (length(btrim(value_override_reason)) between 1 and 1000),
+  country_of_origin_declared char(2) not null check (country_of_origin_declared ~ '^[A-Z]{2}$'),
+  cpc text check (length(cpc) <= 20),
+  batch_id uuid not null,
+  source_row_id uuid not null,
+  entry_method text not null check (entry_method in ('cds','gcd','manual','correction')),
+  change_reason text check (change_reason ~ '^[a-z0-9_]{1,64}$'),
+  content_sha256 char(64) not null check (content_sha256 ~ '^[0-9a-f]{64}$'),
+  created_at timestamptz not null default now(),
+  unique (tenant_id, id),
+  unique (tenant_id, declaration_id, item_no, version),
+  unique (supersedes_id),
+  check ((version = 1) = (supersedes_id is null)),
+  check (version = 1 or change_reason is not null),
+  check (customs_value_gbp is null or customs_value_currency = 'GBP'),
+  check (value_source = 'declared' or value_override_reason is not null),
+  check (value_source <> 'correction' or supersedes_id is not null),
+  check (entry_method <> 'correction' or supersedes_id is not null),
+  foreign key (tenant_id, declaration_id) references cbam.declarations (tenant_id, id),
+  foreign key (tenant_id, supersedes_id) references cbam.import_lines (tenant_id, id),
+  foreign key (tenant_id, batch_id) references cbam.import_batches (tenant_id, id),
+  foreign key (tenant_id, source_row_id) references cbam.source_rows (tenant_id, id)
+);
+create index import_lines_tenant_code on cbam.import_lines (tenant_id, commodity_code);
+create index import_lines_tenant_declaration on cbam.import_lines (tenant_id, declaration_id);
+create index import_lines_tenant_batch on cbam.import_lines (tenant_id, batch_id);
+
+create table cbam.import_line_sources (
+  id uuid primary key,
+  tenant_id uuid not null references cbam.tenants (id),
+  import_line_id uuid not null,
+  source_row_id uuid not null,
+  report_type text check (report_type in
+    ('import_item','import_header','import_tax_lines','export_item')),
+  role text not null check (role in ('primary','header','tax_line','duplicate_seen')),
+  created_at timestamptz not null default now(),
+  unique (import_line_id, source_row_id, role),
+  foreign key (tenant_id, import_line_id) references cbam.import_lines (tenant_id, id),
+  foreign key (tenant_id, source_row_id) references cbam.source_rows (tenant_id, id)
+);
+-- A row of an item report becomes at most one line, or is seen again as a duplicate of one.
+create unique index import_line_sources_row_once on cbam.import_line_sources (source_row_id)
+  where role in ('primary','duplicate_seen');
+create index import_line_sources_line on cbam.import_line_sources (tenant_id, import_line_id);
+
+-- The version chain is checked by the database as well as the application.
+create function cbam.declarations_check_chain() returns trigger language plpgsql as $$
+declare
+  prev cbam.declarations%rowtype;
+begin
+  if new.supersedes_id is not null then
+    select * into prev from cbam.declarations
+     where tenant_id = new.tenant_id and id = new.supersedes_id;
+    if not found or prev.mrn <> new.mrn or new.version <> prev.version + 1 then
+      raise exception 'declaration version chain is broken';
+    end if;
+  end if;
+  return new;
+end $$;
+create trigger declarations_chain before insert on cbam.declarations
+  for each row execute function cbam.declarations_check_chain();
+
+create function cbam.import_lines_check_chain() returns trigger language plpgsql as $$
+declare
+  prev cbam.import_lines%rowtype;
+  prev_mrn text;
+  new_mrn text;
+begin
+  if new.supersedes_id is not null then
+    select * into prev from cbam.import_lines
+     where tenant_id = new.tenant_id and id = new.supersedes_id;
+    if not found or prev.item_no <> new.item_no or new.version <> prev.version + 1 then
+      raise exception 'import line version chain is broken';
+    end if;
+    select mrn into prev_mrn from cbam.declarations
+     where tenant_id = prev.tenant_id and id = prev.declaration_id;
+    select mrn into new_mrn from cbam.declarations
+     where tenant_id = new.tenant_id and id = new.declaration_id;
+    if prev_mrn is distinct from new_mrn then
+      raise exception 'a correction must stay on the same declaration reference';
+    end if;
+  end if;
+  return new;
+end $$;
+create trigger import_lines_chain before insert on cbam.import_lines
+  for each row execute function cbam.import_lines_check_chain();
+
+create trigger parties_immutable before update or delete on cbam.parties
+  for each row execute function cbam.import_facts_block_change();
+create trigger declarations_immutable before update or delete on cbam.declarations
+  for each row execute function cbam.import_facts_block_change();
+create trigger import_lines_immutable before update or delete on cbam.import_lines
+  for each row execute function cbam.import_facts_block_change();
+create trigger import_line_sources_immutable before update or delete on cbam.import_line_sources
+  for each row execute function cbam.import_facts_block_change();
+create trigger parties_no_truncate before truncate on cbam.parties
+  for each statement execute function cbam.import_facts_block_change();
+create trigger declarations_no_truncate before truncate on cbam.declarations
+  for each statement execute function cbam.import_facts_block_change();
+create trigger import_lines_no_truncate before truncate on cbam.import_lines
+  for each statement execute function cbam.import_facts_block_change();
+create trigger import_line_sources_no_truncate before truncate on cbam.import_line_sources
+  for each statement execute function cbam.import_facts_block_change();
+"""
+
+_RLS = "\n".join(
+    f"""
+alter table cbam.{t} enable row level security;
+alter table cbam.{t} force row level security;
+create policy tenant_isolation on cbam.{t}
+  using (tenant_id = cbam.current_tenant()) with check (tenant_id = cbam.current_tenant());
+revoke update, delete, truncate on cbam.{t} from cbam_app;
+"""
+    for t in _TABLES
+)
+
+_DEFINER = """
+-- First cross-tenant code path (docs/SECURITY.md): counts only, current lines only.
+create policy impact_counts_owner on cbam.import_lines for select to cbam_owner using (true);
+
+create function cbam.impact_line_counts_by_code_prefix(prefixes text[])
+returns table (tenant_id uuid, line_count bigint)
+language sql stable security definer set search_path = cbam, pg_temp as $$
+  select l.tenant_id, count(*)::bigint
+    from cbam.import_lines l
+   where not exists (select 1 from cbam.import_lines n
+                      where n.tenant_id = l.tenant_id and n.supersedes_id = l.id)
+     and exists (select 1 from unnest(prefixes) p
+                  where p ~ '^[0-9]{1,10}$' and left(l.commodity_code, length(p)) = p)
+   group by l.tenant_id
+$$;
+revoke all on function cbam.impact_line_counts_by_code_prefix(text[]) from public;
+grant execute on function cbam.impact_line_counts_by_code_prefix(text[]) to cbam_app;
+"""
+
+_DOWN = """
+drop function cbam.impact_line_counts_by_code_prefix(text[]);
+drop table cbam.import_line_sources;
+drop table cbam.import_lines;
+drop table cbam.declarations;
+drop table cbam.parties;
+drop function cbam.import_lines_check_chain();
+drop function cbam.declarations_check_chain();
+drop function cbam.import_facts_block_change();
+alter table cbam.import_batches drop column lease_owner;
+"""
+
+
+def upgrade() -> None:
+    op.execute("set local role cbam_owner")
+    op.execute(_SQL)
+    op.execute(_RLS)
+    op.execute(_DEFINER)
+
+
+def downgrade() -> None:
+    op.execute("set local role cbam_owner")
+    op.execute(_DOWN)

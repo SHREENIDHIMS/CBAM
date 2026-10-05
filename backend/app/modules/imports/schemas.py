@@ -1,5 +1,6 @@
 from datetime import date, datetime
-from typing import Literal, Self
+from decimal import Decimal
+from typing import Any, Literal, Self
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -113,3 +114,123 @@ class RowExceptionOut(BaseModel):
 class RowExceptionPage(BaseModel):
     items: list[RowExceptionOut]
     next_cursor: str | None
+
+
+EntryMethod = Literal["cds", "gcd", "manual", "correction"]
+SourceRole = Literal["primary", "header", "tax_line", "duplicate_seen"]
+
+
+class ImportLineOut(BaseModel):
+    """One normalised customs line. Amounts and masses are decimal strings. There is no tax
+    point, scope, quarter or threshold field: those are decided later and stored elsewhere
+    (CLAUDE.md rule 3). `acceptance_date` is the date the report gave, NOT a tax point."""
+
+    id: UUID
+    declaration_id: UUID
+    mrn: str
+    acceptance_date: date
+    item_no: int
+    version: int
+    supersedes_id: UUID | None
+    is_current: bool
+    commodity_code: str
+    description: str | None
+    net_mass_kg: Decimal
+    customs_value_source: Decimal
+    customs_value_currency: str
+    customs_value_gbp: Decimal | None
+    customs_value_gbp_note: str | None
+    valuation_basis: str | None
+    value_source: str
+    value_override_reason: str | None
+    country_of_origin_declared: str
+    cpc: str | None
+    batch_id: UUID
+    source_row_id: UUID
+    entry_method: EntryMethod
+    change_reason: str | None
+    created_at: datetime | None
+    open_exceptions: int
+
+
+class ImportLinePage(BaseModel):
+    items: list[ImportLineOut]
+    next_cursor: str | None
+
+
+class PartyOut(BaseModel):
+    id: UUID
+    eori: str | None
+    name: str | None
+
+
+class DeclarationOut(BaseModel):
+    id: UUID
+    mrn: str
+    version: int
+    supersedes_id: UUID | None
+    is_current: bool
+    acceptance_date: date
+    acceptance_at: datetime | None
+    procedure_code: str | None
+    additional_procedure_codes: list[str] | None
+    importer: PartyOut | None
+    declarant: PartyOut | None
+    representative: PartyOut | None
+    representation_type: Literal["self", "direct", "indirect", "unknown"]
+    eori_context: Literal["GB", "XI"] | None
+    entry_method: EntryMethod
+    batch_id: UUID
+    created_at: datetime | None
+
+
+class SourceRowOut(BaseModel):
+    """The raw row exactly as read from the file (header -> cell text)."""
+
+    source_row_id: UUID
+    role: SourceRole
+    report_type: str | None
+    batch_id: UUID
+    row_number: int
+    raw: dict[str, Any]
+    row_sha256: str
+
+
+class StoredFileOut(BaseModel):
+    """What was stored for the batch's file. Not a download."""
+
+    document_version_id: UUID | None
+    filename: str | None
+    sha256: str | None
+    size_bytes: int | None
+
+
+class LineBatchOut(BaseModel):
+    id: UUID
+    status: str
+    acquisition_method: str
+    cds_report_type: str | None
+    eori_context: Literal["GB", "XI"] | None
+    acquired_on: date | None
+    window_start: date | None
+    window_end: date | None
+
+
+class LineVersionOut(BaseModel):
+    id: UUID
+    version: int
+    supersedes_id: UUID | None
+    is_current: bool
+    change_reason: str | None
+    batch_id: UUID
+    created_at: datetime | None
+
+
+class ImportLineDetail(BaseModel):
+    line: ImportLineOut
+    declaration: DeclarationOut
+    sources: list[SourceRowOut]
+    batch: LineBatchOut
+    file: StoredFileOut
+    versions: list[LineVersionOut]
+    open_exceptions: list[RowExceptionOut]

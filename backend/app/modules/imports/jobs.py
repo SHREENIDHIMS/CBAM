@@ -32,6 +32,10 @@ log = structlog.get_logger()
 Enqueuer = Callable[[UUID, UUID], None]
 
 
+def retry_countdown(retries: int) -> int:
+    return int(min(_BACKOFF_SECONDS * 2**retries, _BACKOFF_CAP_SECONDS))
+
+
 @celery_app.task(  # type: ignore[untyped-decorator]
     name="app.modules.imports.jobs.process_batch",
     bind=True,
@@ -41,6 +45,7 @@ Enqueuer = Callable[[UUID, UUID], None]
 )
 def process_batch_task(self: Any, tenant_id: str, batch_id: str) -> str:
     final = self.request.retries >= MAX_RETRIES
+    countdown = retry_countdown(self.request.retries)
     try:
         return process_batch(
             get_engine(),
@@ -49,11 +54,11 @@ def process_batch_task(self: Any, tenant_id: str, batch_id: str) -> str:
             UUID(tenant_id),
             UUID(batch_id),
             final_attempt=final,
+            release_delay_seconds=countdown,  # the lease is held until the retry is due
         )
     except Exception as exc:
         if final or getattr(exc, "permanent", False):
             raise
-        countdown = min(_BACKOFF_SECONDS * 2**self.request.retries, _BACKOFF_CAP_SECONDS)
         raise self.retry(exc=exc, countdown=countdown) from None
 
 
