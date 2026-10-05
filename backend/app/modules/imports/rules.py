@@ -8,8 +8,11 @@ import codecs
 import hashlib
 import json
 import re
-from collections.abc import Mapping
-from datetime import date
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from datetime import date, datetime
+from decimal import Decimal
+from typing import Any
 
 from app.core.decisions import Decision
 
@@ -148,3 +151,590 @@ def is_failure_code(value: str) -> bool:
     """A failure reason is a short code such as `unreadable_header`, never free text: parser
     messages can quote cell values, which may be personal data, and the reason is audited."""
     return _FAILURE_CODE.match(value) is not None
+
+
+# --- Row validation (R1-025) -------------------------------------------------------------
+#
+# Format and presence checks only. No scope, no tax point, no threshold decision is made here:
+# the acceptance date is kept as the customs report gave it and is NOT a tax point (CLAUDE.md
+# rule 3). The commodity code is not looked up in the scope list (that is Phase 4). The column
+# names a report really uses come from the `cds_report_layouts` reference dataset (DATA-DEC-002,
+# provisional); nothing about HMRC's real headings is written here.
+
+RULE_ROW_VALIDATION = "R1-025.row_validation"
+
+# The product's own vocabulary for "what a column means". A layout row maps a file column to
+# one of these; a column with any other (or no) target is kept in the raw row and ignored.
+CANONICAL_FIELDS: frozenset[str] = frozenset(
+    {
+        "declaration.mrn",
+        "declaration.acceptance_date",
+        "declaration.eori",
+        "line.item_no",
+        "line.commodity_code",
+        "line.net_mass_kg",
+        "line.customs_value",
+        "line.customs_value_currency",
+        "line.origin_country",
+        "line.valuation_basis",
+        "line.cpc",
+        "line.supplier_ref",
+        "line.description",
+    }
+)
+
+# Shapes of the stored numbers (docs/TECHNICAL_SPEC.md section 5): net mass NUMERIC(20,6),
+# source money NUMERIC(24,8). These are storage limits, not regulatory values.
+_MASS_INT_DIGITS, _MASS_SCALE = 14, 6
+_VALUE_INT_DIGITS, _VALUE_SCALE = 16, 8
+
+# code -> (severity, fixed message). Messages never contain a cell value: a cell can be
+# personal or commercial data, and the report is exported (docs/SECURITY.md).
+ISSUES: dict[str, tuple[str, str]] = {
+    "MRN_MISSING": ("error", "The declaration reference (MRN) is empty. Fill it in and re-upload."),
+    "ITEM_NO_MISSING": ("error", "The item number is empty. Fill it in and re-upload."),
+    "ITEM_NO_INVALID": (
+        "error",
+        "The item number must be a whole number of 1 or more, up to 5 digits.",
+    ),
+    "COMMODITY_CODE_MISSING": (
+        "error",
+        "The commodity code is empty. Enter the 8 to 10 digit code from the declaration.",
+    ),
+    "COMMODITY_CODE_INVALID": (
+        "error",
+        "The commodity code must be 8 to 10 digits with no spaces or letters.",
+    ),
+    "NET_MASS_MISSING": ("error", "The net mass is empty. Enter the net mass in kilograms."),
+    "NET_MASS_INVALID": (
+        "error",
+        "The net mass must be a plain number of kilograms, zero or more, with no units "
+        "or thousands separators.",
+    ),
+    "NET_MASS_PRECISION": (
+        "error",
+        "The net mass has more than 6 decimal places. It is not rounded for you: "
+        "correct it at source and re-upload.",
+    ),
+    "ACCEPTANCE_DATE_MISSING": ("error", "The acceptance date is empty. Fill it in and re-upload."),
+    "ACCEPTANCE_DATE_INVALID": (
+        "error",
+        "The acceptance date is not a valid date in the format this report uses.",
+    ),
+    "ORIGIN_MISSING": ("error", "The country of origin is empty. Enter the 2-letter country code."),
+    "ORIGIN_INVALID": (
+        "error",
+        "The country of origin must be a 2-letter code in capitals, such as DE.",
+    ),
+    "VALUE_MISSING": ("error", "The customs value is empty. Enter the value as declared."),
+    "VALUE_INVALID": (
+        "error",
+        "The customs value must be a plain number, zero or more, with no currency symbol "
+        "or thousands separators.",
+    ),
+    "CURRENCY_MISSING": ("error", "The currency is empty. Enter the 3-letter currency code."),
+    "CURRENCY_INVALID": (
+        "error",
+        "The currency must be a 3-letter code in capitals, such as EUR.",
+    ),
+    "SUPPLIER_MISSING": (
+        "warning",
+        "No supplier is named on this row, so it cannot be linked to a supplier. "
+        "This does not stop the row being used.",
+    ),
+    "EORI_MISSING": ("error", "The EORI is empty. Fill it in and re-upload."),
+    "VALUATION_BASIS_MISSING": (
+        "error",
+        "The valuation method is empty. Fill it in and re-upload.",
+    ),
+    "CPC_MISSING": ("error", "The customs procedure code is empty. Fill it in and re-upload."),
+    "DESCRIPTION_MISSING": ("error", "The goods description is empty. Fill it in and re-upload."),
+    "VALUE_PRECISION": (
+        "error",
+        "The customs value has more than 8 decimal places. It is not rounded for you: "
+        "correct it at source and re-upload.",
+    ),
+    "ROW_TOO_LARGE": (
+        "error",
+        "A row is larger than the allowed size. Split the file or shorten the cells "
+        "and upload it again.",
+    ),
+    "HEADER_TOO_MANY_COLUMNS": (
+        "error",
+        "The header row has more columns than are allowed. Remove unused columns and "
+        "upload the file again.",
+    ),
+    "HEADER_TOO_LONG": (
+        "error",
+        "A heading in the header row is longer than allowed. Check that the first row "
+        "is the real header row and upload again.",
+    ),
+    "LAYOUT_INVALID": (
+        "error",
+        "The active column layout is incomplete or ambiguous, so the file cannot be read. "
+        "Ask the domain owner to fix the layout, then upload the file again.",
+    ),
+    "FILE_INFECTED": (
+        "error",
+        "The file was flagged by the malware scan and was not read. Do not open it; "
+        "get a clean copy and upload it again.",
+    ),
+    "ROW_TOO_LONG": (
+        "error",
+        "The row has more cells than the header row. Check for an unquoted comma and re-upload.",
+    ),
+    "ROW_TOO_SHORT": (
+        "error",
+        "The row has fewer cells than the header row. Check for a missing cell and re-upload.",
+    ),
+    # file-level problems (row number 0)
+    "COLUMN_MISSING": (
+        "error",
+        "A required column is missing from the file. Add the column named in the Field "
+        "column and upload the file again.",
+    ),
+    "HEADER_MISSING": (
+        "error",
+        "The header row is empty. Upload a file that starts with headings.",
+    ),
+    "HEADER_DUPLICATE": (
+        "error",
+        "Two columns in the header row have the same heading. Rename one and upload again.",
+    ),
+    "REPORT_TYPE_MISSING": (
+        "error",
+        "The report type was not declared at upload, so the layout cannot be chosen. "
+        "Upload the file again and choose the report type.",
+    ),
+    "LAYOUT_NOT_ACTIVE": (
+        "error",
+        "No active column layout exists for this report type, so the file cannot be read yet. "
+        "Ask the domain owner to activate the layout, then upload the file again.",
+    ),
+    "FILE_UNREADABLE": (
+        "error",
+        "The file could not be read as CSV. Check for a very long cell or a broken quote "
+        "and upload it again.",
+    ),
+}
+FILE_LEVEL_CODES: frozenset[str] = frozenset(
+    {
+        "COLUMN_MISSING",
+        "HEADER_MISSING",
+        "HEADER_DUPLICATE",
+        "REPORT_TYPE_MISSING",
+        "LAYOUT_NOT_ACTIVE",
+        "FILE_UNREADABLE",
+        "HEADER_TOO_MANY_COLUMNS",
+        "HEADER_TOO_LONG",
+        "ROW_TOO_LARGE",
+        "LAYOUT_INVALID",
+        "FILE_INFECTED",
+    }
+)
+
+LAYOUT_STATUSES: tuple[str, ...] = (
+    "matched",
+    "not_active",
+    "columns_missing",
+    "unreadable",
+    "invalid",
+)
+EXTRA_CELLS_KEY = "__extra_cells__"
+
+
+def issue_severity(code: str) -> str:
+    return ISSUES[code][0]
+
+
+def issue_message(code: str) -> str:
+    return ISSUES[code][1]
+
+
+@dataclass(frozen=True)
+class Issue:
+    code: str
+    field: str  # a canonical field name, or "" for a whole-row problem
+
+
+@dataclass(frozen=True)
+class LayoutColumn:
+    name: str  # the heading in the file
+    maps_to: str | None
+    required: bool
+    date_format: str | None = None
+
+
+def layout_columns(rows: Sequence[Mapping[str, Any]], report_type: str) -> tuple[LayoutColumn, ...]:
+    """The columns of one report type from the active `cds_report_layouts` rows."""
+    return tuple(
+        LayoutColumn(
+            name=str(r["column_name"]),
+            maps_to=r.get("maps_to") or None,
+            required=bool(r["required"]),
+            date_format=r.get("date_format") or None,
+        )
+        for r in rows
+        if r["report_type"] == report_type
+    )
+
+
+def layout_is_invalid(columns: Sequence[LayoutColumn]) -> bool:
+    """A layout we must not guess about: a date column without its declared format, or two
+    columns mapped to the same canonical field (one would silently overwrite the other)."""
+    seen: set[str] = set()
+    for col in columns:
+        if col.maps_to not in CANONICAL_FIELDS:
+            continue
+        if col.maps_to in seen:
+            return True
+        seen.add(col.maps_to)
+        if col.maps_to == "declaration.acceptance_date" and not col.date_format:
+            return True
+    return False
+
+
+@dataclass(frozen=True)
+class ImportLimits:
+    """Operational limits for reading one file (settings, not law)."""
+
+    max_columns: int
+    max_heading_chars: int
+    max_cell_chars: int
+    max_row_chars: int
+    chunk_max_chars: int
+    max_attempts: int
+    lease_seconds: int
+
+
+def header_problem(cells: Sequence[str], limits: ImportLimits) -> str | None:
+    """A file-level code if the header row breaks a limit, else None."""
+    if len(cells) > limits.max_columns:
+        return "HEADER_TOO_MANY_COLUMNS"
+    if any(len(c) > limits.max_heading_chars for c in cells):
+        return "HEADER_TOO_LONG"
+    return None
+
+
+def row_chars(cells: Sequence[str]) -> int:
+    """Size of a row for the row and chunk budgets (characters in all cells)."""
+    return sum(len(c) for c in cells) + len(cells)
+
+
+def _norm(heading: str) -> str:
+    return heading.replace("﻿", "").strip().casefold()
+
+
+@dataclass(frozen=True)
+class LayoutMatch:
+    headers: tuple[str, ...]  # exactly as read
+    duplicate_headers: bool
+    missing_required: tuple[str, ...]  # layout column names, in layout order
+    by_header: Mapping[str, LayoutColumn]  # file heading -> layout column (mapped ones only)
+
+    @property
+    def ok(self) -> bool:
+        return not self.duplicate_headers and not self.missing_required
+
+
+def match_layout(headers: Sequence[str], columns: Sequence[LayoutColumn]) -> LayoutMatch:
+    """Match a file's headings to a layout by heading text (case and outer spaces ignored).
+
+    Extra columns are fine and stay in the raw row; a missing required column fails the file.
+    """
+    by_norm: dict[str, str] = {}
+    duplicate = False
+    for heading in headers:
+        key = _norm(heading)
+        if key in by_norm:
+            duplicate = True
+        by_norm[key] = heading
+    missing: list[str] = []
+    mapped: dict[str, LayoutColumn] = {}
+    for col in columns:
+        found = by_norm.get(_norm(col.name))
+        if found is None:
+            if col.required:
+                missing.append(col.name)
+            continue
+        if col.maps_to in CANONICAL_FIELDS:
+            mapped[found] = col
+    return LayoutMatch(
+        headers=tuple(headers),
+        duplicate_headers=duplicate,
+        missing_required=tuple(missing),
+        by_header=mapped,
+    )
+
+
+def raw_headers(cells: Sequence[str]) -> tuple[str, ...]:
+    """Raw-row keys: the headings as read (a blank heading is named `column_N`)."""
+    out: list[str] = []
+    for i, cell in enumerate(cells):
+        text = cell.replace("﻿", "", 1) if i == 0 else cell
+        out.append(text if text.strip() else f"column_{i + 1}")
+    return tuple(out)
+
+
+def build_raw(headers: Sequence[str], cells: Sequence[str]) -> tuple[dict[str, Any], list[Issue]]:
+    """Header -> cell text exactly as read. Extra cells go under one reserved key; a short row
+    simply has fewer keys. Neither case drops or alters a cell."""
+    raw: dict[str, Any] = dict(zip(headers, cells, strict=False))
+    issues: list[Issue] = []
+    if len(cells) > len(headers):
+        raw[EXTRA_CELLS_KEY] = list(cells[len(headers) :])
+        issues.append(Issue("ROW_TOO_LONG", ""))
+    elif len(cells) < len(headers):
+        issues.append(Issue("ROW_TOO_SHORT", ""))
+    return raw, issues
+
+
+def row_hash(raw: Mapping[str, Any]) -> str:
+    canonical = json.dumps(dict(raw), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+@dataclass(frozen=True)
+class MappedRow:
+    values: Mapping[str, str]  # canonical field -> cell text, as read
+    required: frozenset[str]
+    date_formats: Mapping[str, str]
+    mapped: frozenset[str]  # canonical fields this layout maps at all
+
+
+def map_row(raw: Mapping[str, Any], match: LayoutMatch) -> MappedRow:
+    values: dict[str, str] = {}
+    required: set[str] = set()
+    formats: dict[str, str] = {}
+    mapped: set[str] = set()
+    for heading, col in match.by_header.items():
+        if col.maps_to is None:
+            continue
+        mapped.add(col.maps_to)
+        cell = raw.get(heading)
+        if isinstance(cell, str):
+            values[col.maps_to] = cell
+        if col.required:
+            required.add(col.maps_to)
+        if col.date_format:
+            formats[col.maps_to] = col.date_format
+    return MappedRow(values, frozenset(required), formats, frozenset(mapped))
+
+
+_PLAIN_NUMBER = re.compile(r"^(?P<int>[0-9]+)(?:\.(?P<frac>[0-9]*))?$")
+_COMMODITY = re.compile(r"^[0-9]{8,10}$")
+_ITEM_NO = re.compile(r"^[0-9]{1,5}$")
+_COUNTRY = re.compile(r"^[A-Z]{2}$")
+_CURRENCY = re.compile(r"^[A-Z]{3}$")
+
+
+def parse_plain_decimal(text: str, *, int_digits: int, scale: int) -> tuple[Decimal | None, bool]:
+    """(value, too_precise). Plain digits with an optional point only: no sign, exponent,
+    separators, NaN or infinity. The value goes from text to Decimal directly, never through a
+    binary float. More decimals than `scale` (ignoring trailing zeros) is reported, not rounded."""
+    match = _PLAIN_NUMBER.match(text.strip())
+    if match is None:
+        return None, False
+    whole = match.group("int").lstrip("0") or "0"
+    frac = (match.group("frac") or "").rstrip("0")
+    if len(whole) > int_digits:
+        return None, False
+    if len(frac) > scale:
+        return None, True
+    return Decimal(f"{whole}.{frac}" if frac else whole), False
+
+
+def parse_date(text: str, date_format: str) -> date | None:
+    try:
+        return datetime.strptime(text.strip(), date_format).date()  # noqa: DTZ007 - date only
+    except (ValueError, OverflowError):
+        return None
+
+
+def _check_item_no(value: str) -> str | None:
+    return None if _ITEM_NO.match(value) and int(value) >= 1 else "ITEM_NO_INVALID"
+
+
+def _check_commodity(value: str) -> str | None:
+    # PROVISIONAL structural check (R1-005, R1-052; docs/OPEN_DECISIONS.md): 8 to 10 digits.
+    # The exact code is preserved and nothing checks that it exists in the tariff.
+    return None if _COMMODITY.match(value) else "COMMODITY_CODE_INVALID"
+
+
+def _check_mass(value: str) -> str | None:
+    number, precise = parse_plain_decimal(value, int_digits=_MASS_INT_DIGITS, scale=_MASS_SCALE)
+    if precise:
+        return "NET_MASS_PRECISION"
+    return None if number is not None else "NET_MASS_INVALID"
+
+
+def _check_value(value: str) -> str | None:
+    number, precise = parse_plain_decimal(value, int_digits=_VALUE_INT_DIGITS, scale=_VALUE_SCALE)
+    if precise:
+        return "VALUE_PRECISION"
+    return None if number is not None else "VALUE_INVALID"
+
+
+def _check_currency(value: str) -> str | None:
+    return None if _CURRENCY.match(value) else "CURRENCY_INVALID"
+
+
+def _check_origin(value: str) -> str | None:
+    return None if _COUNTRY.match(value) else "ORIGIN_INVALID"
+
+
+_SHAPE_CHECKS: dict[str, Callable[[str], str | None]] = {
+    "line.item_no": _check_item_no,
+    "line.commodity_code": _check_commodity,
+    "line.net_mass_kg": _check_mass,
+    "line.customs_value": _check_value,
+    "line.customs_value_currency": _check_currency,
+    "line.origin_country": _check_origin,
+}
+
+_MISSING: dict[str, str] = {
+    "declaration.mrn": "MRN_MISSING",
+    "declaration.acceptance_date": "ACCEPTANCE_DATE_MISSING",
+    "declaration.eori": "EORI_MISSING",
+    "line.item_no": "ITEM_NO_MISSING",
+    "line.commodity_code": "COMMODITY_CODE_MISSING",
+    "line.net_mass_kg": "NET_MASS_MISSING",
+    "line.customs_value": "VALUE_MISSING",
+    "line.customs_value_currency": "CURRENCY_MISSING",
+    "line.origin_country": "ORIGIN_MISSING",
+    "line.valuation_basis": "VALUATION_BASIS_MISSING",
+    "line.cpc": "CPC_MISSING",
+    "line.supplier_ref": "SUPPLIER_MISSING",
+    "line.description": "DESCRIPTION_MISSING",
+}
+
+
+def validate_row(row: MappedRow) -> tuple[Issue, ...]:
+    """Format and presence problems for the fields the layout maps. Never raises, whatever the
+    cell text. An empty cell is an error wherever the layout marks the column required; an empty
+    supplier is always only a warning (supplier matching arrives with the register, Phase 6)."""
+    issues: list[Issue] = []
+    for field in sorted(row.mapped):
+        value = row.values.get(field, "").strip()
+        if value == "":
+            if field == "line.supplier_ref" or field in row.required:
+                issues.append(Issue(_MISSING[field], field))
+            continue
+        if field == "declaration.acceptance_date":
+            date_format = row.date_formats.get(field)
+            if date_format is None or parse_date(value, date_format) is None:
+                issues.append(Issue("ACCEPTANCE_DATE_INVALID", field))
+            continue
+        check = _SHAPE_CHECKS.get(field)
+        code = check(value) if check else None
+        if code:
+            issues.append(Issue(code, field))
+    return tuple(issues)
+
+
+def row_is_valid(issues: Sequence[Issue]) -> bool:
+    """A row with any error is rejected; a row with only warnings continues."""
+    return all(issue_severity(i.code) != "error" for i in issues)
+
+
+_CSV_FORMULA_START = (
+    "=",
+    "+",
+    "-",
+    "@",
+    ";",
+    "|",
+    "\t",
+    "\r",
+    "\n",
+    "\uff1d",  # fullwidth = + - @
+    "\uff0b",
+    "\uff0d",
+    "\uff20",
+)
+_CSV_QUOTES = "'\""
+
+
+def csv_safe(value: str) -> str:
+    """Stop spreadsheet formula injection: a cell that starts (after any spaces or quotes) with
+    = + - @ ; | their fullwidth forms, or starts with tab, CR or LF, gets a leading apostrophe
+    (docs/SECURITY.md files checklist). Applied to every exported cell."""
+    start = 0
+    while start < len(value) and (value[start].isspace() or value[start] in _CSV_QUOTES):
+        start += 1
+    if value.startswith(("\t", "\r", "\n")) or value[start:].startswith(_CSV_FORMULA_START):
+        return "'" + value
+    return value
+
+
+class RecordLimitError(Exception):
+    """A CSV record broke a size limit. `code` is a file-level issue code, never content."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+class RecordGuard:
+    """Feeds physical lines and enforces limits on the CSV RECORD being built, so a record
+    cannot grow without bound by hiding newlines inside quotes (the csv module holds the whole
+    record in memory before returning it). Tracks quote state like the csv module does (a quote
+    only opens a quoted field at the start of a field; a doubled quote inside one is a literal
+    quote), the characters of the current record and the separators outside quotes.
+
+    The first non-blank record is the header: its limits give HEADER_TOO_LONG and
+    HEADER_TOO_MANY_COLUMNS; for data rows both give ROW_TOO_LARGE.
+    """
+
+    def __init__(self, *, max_record_chars: int, max_columns: int) -> None:
+        self._max_chars = max_record_chars
+        self._max_columns = max_columns
+        self._in_quote = False
+        self._at_start = True
+        self._after_quote = False
+        self._chars = 0
+        self._separators = 0
+        self._header_done = False
+        self._nonblank = False
+
+    def _fail(self, kind: str) -> RecordLimitError:
+        if self._header_done:
+            return RecordLimitError("ROW_TOO_LARGE")
+        return RecordLimitError("HEADER_TOO_LONG" if kind == "chars" else "HEADER_TOO_MANY_COLUMNS")
+
+    def feed(self, line: str) -> None:
+        """Account for one physical line; raises RecordLimitError past a limit."""
+        self._chars += len(line)
+        if self._chars > self._max_chars:
+            raise self._fail("chars")
+        if line.strip("\r\n"):
+            self._nonblank = True
+        if '"' in line:
+            self._scan(line)
+        elif not self._in_quote:
+            self._separators += line.count(",")
+        if self._separators >= self._max_columns:
+            raise self._fail("columns")
+        if not self._in_quote and line.endswith(("\n", "\r")):
+            self._header_done = self._header_done or self._nonblank
+            self._nonblank = False
+            self._chars = 0
+            self._separators = 0
+            self._at_start = True
+            self._after_quote = False
+
+    def _scan(self, line: str) -> None:
+        in_quote, at_start, after_quote = self._in_quote, self._at_start, self._after_quote
+        for ch in line:
+            if in_quote:
+                if ch == '"':
+                    in_quote, after_quote = False, True
+                continue
+            if ch == '"' and (at_start or after_quote):
+                in_quote, at_start, after_quote = True, False, False
+            elif ch == ",":
+                self._separators += 1
+                at_start, after_quote = True, False
+            else:
+                at_start, after_quote = False, False
+        self._in_quote, self._at_start, self._after_quote = in_quote, at_start, after_quote

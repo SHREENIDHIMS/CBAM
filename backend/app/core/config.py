@@ -38,6 +38,23 @@ class Settings(BaseSettings):
     import_max_file_bytes: int = 52_428_800
     # Uploads one client may have in flight at once in this process (429 above it).
     import_max_concurrent_uploads_per_tenant: int = Field(default=3, ge=1)
+    # Operational limits for reading one customs file (product config, not law). A file that
+    # breaks one is rejected with a file-level code and no content in the message.
+    import_max_columns: int = Field(default=200, ge=1)
+    import_max_heading_chars: int = Field(default=200, ge=1)
+    import_max_cell_chars: int = Field(default=4096, ge=1)
+    import_max_row_chars: int = Field(default=1_048_576, ge=1)
+    # A chunk is saved when it reaches 500 rows or this many characters, whichever is first.
+    import_chunk_max_bytes: int = Field(default=8_388_608, ge=1)
+    # A batch that has been started this many times is a crash loop: it is marked failed.
+    import_max_attempts: int = Field(default=8, ge=1)
+    # A running job holds a lease this long and renews it after every chunk; an expired
+    # lease means the worker died and the sweeper may take the batch over.
+    import_lease_seconds: int = Field(default=300, ge=30)
+    # Batches still received/queued after this long are re-queued by the sweeper.
+    import_stale_batch_minutes: int = Field(default=10, ge=1)
+    # Celery recycles a worker process above this much memory (KiB); 0 = off.
+    celery_worker_max_memory_per_child_kb: int = Field(default=524_288, ge=0)
     sentry_dsn: str = ""
     sentry_environment: str = "local"
     # R1-053: seconds that count as one "day" in the outreach schedule.

@@ -3,14 +3,14 @@ audit event in one transaction (R1-003). Replaying the same file creates nothing
 
 import hashlib
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, suppress
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, BinaryIO
 from uuid import UUID
 
-from sqlalchemy import Row, insert, select, text
+from sqlalchemy import Row, and_, func, insert, or_, select, text, tuple_
 from sqlalchemy.orm import Session
 
 from app.core.audit import ActorType, record
@@ -19,6 +19,7 @@ from app.core.errors import (
     InvalidRequestError,
     PayloadTooLargeError,
     RuleBlockedError,
+    StaleVersionError,
     StorageError,
     TenantMismatchError,
     TooManyRequestsError,
@@ -29,12 +30,19 @@ from app.core.pagination import clamp_limit, decode_cursor, encode_cursor
 from app.core.storage import ObjectStore, new_object_key
 from app.core.versioning import update_versioned
 from app.modules.imports import rules
-from app.modules.imports.models import document_versions, documents, import_batches
+from app.modules.imports.models import (
+    document_versions,
+    documents,
+    import_batches,
+    row_exceptions,
+)
 from app.modules.imports.schemas import (
     ImportBatchCreated,
     ImportBatchMetadata,
     ImportBatchOut,
     ImportBatchPage,
+    RowExceptionOut,
+    RowExceptionPage,
 )
 
 _CHUNK = 64 * 1024
@@ -46,6 +54,13 @@ _PROGRESS_COLUMNS = (
     "lines_created",
     "lines_unchanged",
 )
+
+
+_LAYOUT_COLUMNS = ("report_layout_version_id", "layout_status")
+
+
+def _audit_value(value: Any) -> Any:
+    return str(value) if isinstance(value, UUID) else value
 
 
 @dataclass(frozen=True)
@@ -109,6 +124,8 @@ def _out(row: Row[Any]) -> ImportBatchOut:
         lines_created=row.lines_created,
         lines_unchanged=row.lines_unchanged,
         failure_reason=row.failure_reason,
+        report_layout_version_id=row.report_layout_version_id,
+        layout_status=row.layout_status,
         created_at=row.created_at,
         created_by=row.created_by,
         row_version=row.row_version,
@@ -429,6 +446,7 @@ def advance_batch(
     now: datetime,
     progress: dict[str, int] | None = None,
     failure_reason: str | None = None,
+    layout: dict[str, Any] | None = None,
 ) -> ImportBatchOut:
     """Move a batch forward (and update its counters), with audit. Used by the import jobs.
 
@@ -454,6 +472,10 @@ def advance_batch(
         values[name] = number
     if failure_reason is not None:
         values["failure_reason"] = failure_reason
+    for name, value in (layout or {}).items():
+        if name not in _LAYOUT_COLUMNS:
+            raise InvalidRequestError(f"{name} is not a layout column")
+        values[name] = value
     update_versioned(
         session, "import_batches", row_id=batch_id, expected_version=expected_version, values=values
     )
@@ -472,7 +494,257 @@ def advance_batch(
         object_id=batch_id,
         occurred_at=now,
         before={"status": current.status},
-        after={"status": updated.status, **{k: values[k] for k in values if k != "status"}},
+        after={
+            "status": updated.status,
+            **{k: _audit_value(values[k]) for k in values if k != "status"},
+        },
         reason=failure_reason,
     )
     return _out(updated)
+
+
+_MAX_ROW_NUMBER = 2**31 - 1
+_EXCEPTION_SEVERITIES = ("error", "warning")
+_EXCEPTION_STATUSES = ("open", "resolved", "waived")
+
+
+def _exception_query(
+    tenant_id: UUID, batch_id: UUID, severity: str | None, status: str | None
+) -> Any:
+    if severity is not None and severity not in _EXCEPTION_SEVERITIES:
+        raise InvalidRequestError("severity must be error or warning")
+    if status is not None and status not in _EXCEPTION_STATUSES:
+        raise InvalidRequestError("status must be open, resolved or waived")
+    query = select(row_exceptions).where(
+        row_exceptions.c.tenant_id == tenant_id, row_exceptions.c.batch_id == batch_id
+    )
+    if severity:
+        query = query.where(row_exceptions.c.severity == severity)
+    if status:
+        query = query.where(row_exceptions.c.status == status)
+    return query
+
+
+def _exception_out(row: Row[Any]) -> RowExceptionOut:
+    return RowExceptionOut(
+        id=row.id,
+        row_number=row.row_number,
+        field=row.field,
+        code=row.code,
+        severity=row.severity,
+        message=row.message,
+        status=row.status,
+        row_version=row.row_version,
+    )
+
+
+def _exception_page(
+    session: Session,
+    tenant_id: UUID,
+    batch_id: UUID,
+    *,
+    severity: str | None,
+    status: str | None,
+    limit: int,
+    cursor: str | None,
+) -> tuple[list[Row[Any]], bool]:
+    query = _exception_query(tenant_id, batch_id, severity, status)
+    if cursor:
+        c = decode_cursor(cursor)
+        try:
+            after = (int(c["r"]), UUID(str(c["i"])))
+            if not 0 <= after[0] <= _MAX_ROW_NUMBER:
+                raise ValueError("row number out of range")
+        except (KeyError, ValueError, TypeError, OverflowError) as exc:
+            raise InvalidRequestError("The cursor is not valid") from exc
+        query = query.where(tuple_(row_exceptions.c.row_number, row_exceptions.c.id) > after)
+    rows = session.execute(
+        query.order_by(row_exceptions.c.row_number, row_exceptions.c.id).limit(limit + 1)
+    ).all()
+    return list(rows[:limit]), len(rows) > limit
+
+
+def list_exceptions(
+    session: Session,
+    tenant_id: UUID,
+    batch_id: UUID,
+    *,
+    severity: str | None = None,
+    status: str | None = None,
+    limit: int | None = None,
+    cursor: str | None = None,
+) -> RowExceptionPage:
+    """The exception report of a batch, in row order, keyset-paginated."""
+    get_batch(session, tenant_id, batch_id)  # 404 for a batch of another tenant
+    page = clamp_limit(limit)
+    items, more = _exception_page(
+        session, tenant_id, batch_id, severity=severity, status=status, limit=page, cursor=cursor
+    )
+    next_cursor = (
+        encode_cursor({"r": items[-1].row_number, "i": str(items[-1].id)}) if more else None
+    )
+    return RowExceptionPage(items=[_exception_out(r) for r in items], next_cursor=next_cursor)
+
+
+def iter_exception_pages(
+    open_session: Callable[[], AbstractContextManager[Session]],
+    tenant_id: UUID,
+    batch_id: UUID,
+    *,
+    severity: str | None = None,
+    status: str | None = None,
+    page_size: int = 1000,
+) -> Iterator[list[RowExceptionOut]]:
+    """Every exception of a batch, a page per short transaction, so a long download holds no
+    transaction open. The batch must be checked (get_batch) before the first call."""
+    cursor: str | None = None
+    while True:
+        with open_session() as s:
+            rows, more = _exception_page(
+                s,
+                tenant_id,
+                batch_id,
+                severity=severity,
+                status=status,
+                limit=page_size,
+                cursor=cursor,
+            )
+        if rows:
+            yield [_exception_out(r) for r in rows]
+        if not more:
+            return
+        cursor = encode_cursor({"r": rows[-1].row_number, "i": str(rows[-1].id)})
+
+
+def exceptions_csv_rows(pages: Iterator[list[RowExceptionOut]]) -> Iterator[list[str]]:
+    """Header row, then one row per exception. Every cell goes through `csv_safe`, so nothing
+    that came from an uploaded file can be run as a spreadsheet formula."""
+    yield ["row_number", "field", "code", "severity", "message", "status"]
+    for page in pages:
+        for e in page:
+            yield [
+                rules.csv_safe(str(e.row_number)),
+                rules.csv_safe(e.field),
+                rules.csv_safe(e.code),
+                rules.csv_safe(e.severity),
+                rules.csv_safe(e.message),
+                rules.csv_safe(e.status),
+            ]
+
+
+def retry_batch(
+    session: Session,
+    *,
+    tenant_id: UUID,
+    batch_id: UUID,
+    expected_version: int,
+    actor: Actor,
+    now: datetime,
+) -> ImportBatchCreated:
+    """Retry a failed batch: a NEW batch for the same stored file and declared details.
+
+    `failed` is final and locked (CLAUDE.md rule 17), so the old batch stays as history and
+    its partial rows stay with it. Refused (409) for any other status, a stale version, or when
+    the same file already has a live batch.
+    """
+    _lock(session, tenant_id, "retry", str(batch_id))
+    old = session.execute(
+        select(import_batches).where(
+            import_batches.c.tenant_id == tenant_id, import_batches.c.id == batch_id
+        )
+    ).one_or_none()
+    if old is None:
+        raise TenantMismatchError()
+    if old.row_version != expected_version:
+        raise StaleVersionError("This record changed since you loaded it; reload and try again")
+    if old.status != "failed":
+        raise RuleBlockedError(
+            f"Only a failed batch can be retried; this one is {old.status}",
+            rule_id="R1-003.retry_failed_only",
+        )
+    _lock(session, tenant_id, "sha", old.file_sha256)
+    live = session.execute(
+        select(import_batches.c.id).where(
+            import_batches.c.tenant_id == tenant_id,
+            import_batches.c.file_sha256 == old.file_sha256,
+            import_batches.c.status.not_in(rules.HISTORY_STATES),
+        )
+    ).first()
+    if live is not None:
+        raise RuleBlockedError(
+            f"This file already has a newer batch ({live.id}); use that one",
+            rule_id="R1-003.retry_failed_only",
+        )
+    new_id = uuid7()
+    session.execute(
+        insert(import_batches).values(
+            id=new_id,
+            tenant_id=tenant_id,
+            file_sha256=old.file_sha256,
+            document_version_id=old.document_version_id,
+            filename=old.filename,
+            acquisition_method=old.acquisition_method,
+            cds_report_type=old.cds_report_type,
+            eori=old.eori,
+            window_start=old.window_start,
+            window_end=old.window_end,
+            source_owner=old.source_owner,
+            acquired_on=old.acquired_on,
+            idempotency_key=None,
+            request_fingerprint=old.request_fingerprint,
+            status="received",
+            created_at=now,
+            created_by=actor.actor_id,
+            row_version=1,
+        )
+    )
+    record(
+        session,
+        tenant_id=tenant_id,
+        actor_type=actor.actor_type,
+        actor_id=actor.actor_id,
+        action="import_batch.retried",
+        object_type="import_batch",
+        object_id=new_id,
+        occurred_at=now,
+        before=None,
+        after={"status": "received", "retry_of": str(batch_id)},
+    )
+    row = session.execute(
+        select(import_batches).where(
+            import_batches.c.tenant_id == tenant_id, import_batches.c.id == new_id
+        )
+    ).one()
+    return _created(row, replayed=False)
+
+
+def stale_batch_ids(
+    session: Session, tenant_id: UUID, *, older_than: datetime, now: datetime
+) -> list[UUID]:
+    """Batches whose job was lost: still `received`/`queued` since before `older_than` (broker
+    outage at upload, worker lost before it started), or `parsing`/`validating`/`normalising`
+    with a lease that has expired at `now` (worker killed mid-file)."""
+    working = import_batches.c.status.in_(("parsing", "validating", "normalising"))
+    rows = session.execute(
+        select(import_batches.c.id)
+        .where(
+            import_batches.c.tenant_id == tenant_id,
+            or_(
+                and_(
+                    import_batches.c.status.in_(("received", "queued")),
+                    func.coalesce(import_batches.c.updated_at, import_batches.c.created_at)
+                    < older_than,
+                ),
+                and_(
+                    working,
+                    or_(
+                        import_batches.c.lease_expires_at.is_(None),
+                        import_batches.c.lease_expires_at <= now,
+                    ),
+                ),
+            ),
+        )
+        .order_by(import_batches.c.id)
+        .limit(1000)
+    ).scalars()
+    return list(rows)

@@ -6,8 +6,12 @@ from celery.schedules import crontab
 
 from app.core.config import get_settings
 
-celery_app = Celery("cbam", broker=get_settings().redis_url)
+celery_app = Celery("cbam", broker=get_settings().redis_url, include=["app.modules.imports.jobs"])
+_memory_kb = get_settings().celery_worker_max_memory_per_child_kb
+if _memory_kb:  # recycle a worker process that grows too large instead of letting it be killed
+    celery_app.conf.worker_max_memory_per_child = _memory_kb
 celery_app.conf.beat_schedule = {
+    "imports-sweep-stale-batches": {"task": "imports.sweep_stale_batches", "schedule": 300.0},
     "heartbeat": {"task": "app.core.jobs.heartbeat", "schedule": 300.0},
     "escalate-overdue-tasks": {
         "task": "app.core.jobs.escalate_overdue_tasks",

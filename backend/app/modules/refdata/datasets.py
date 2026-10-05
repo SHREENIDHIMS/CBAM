@@ -129,6 +129,7 @@ _SPECS: tuple[DatasetSpec, ...] = (
             _c("column_name"),
             _c("maps_to", optional=True),
             _c("required", "bool"),
+            _c("date_format", optional=True),
         ),
         key=("report_type", "column_name"),
     ),

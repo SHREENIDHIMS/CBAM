@@ -78,6 +78,8 @@ class ImportBatchOut(BaseModel):
     lines_created: int
     lines_unchanged: int
     failure_reason: str | None
+    report_layout_version_id: UUID | None
+    layout_status: str | None
     created_at: datetime | None
     created_by: UUID | None
     row_version: int
@@ -91,4 +93,23 @@ class ImportBatchCreated(ImportBatchOut):
 
 class ImportBatchPage(BaseModel):
     items: list[ImportBatchOut]
+    next_cursor: str | None
+
+
+class RowExceptionOut(BaseModel):
+    """One problem found in an uploaded file. `message` is fixed text per `code`; it never
+    contains a cell value."""
+
+    id: UUID
+    row_number: int
+    field: str
+    code: str
+    severity: Literal["error", "warning"]
+    message: str
+    status: Literal["open", "resolved", "waived"]
+    row_version: int
+
+
+class RowExceptionPage(BaseModel):
+    items: list[RowExceptionOut]
     next_cursor: str | None

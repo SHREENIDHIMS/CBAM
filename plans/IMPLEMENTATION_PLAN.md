@@ -156,10 +156,16 @@ clock, money, decisions, tasks.
 1. - [ ] Freeze the column mapping from real (masked) HMRC "Get customs data" reports
    (DATA-DEC-002); if not yet available, from HMRC's published report descriptions +
    synthetic files, marked provisional. Mapping lives in `ref_cds_report_layouts`.
+   *Note: a provisional SYNTHETIC layout (invented `SYNTH_*` column names) exists only as a
+   test fixture (`backend/tests/fixtures/refdata/cds_report_layouts`). Nothing is in
+   `backend/refdata/`; the real mapping needs a masked HMRC report before the pilot.*
 2. - [x] `import_batches` + upload endpoint: store original file in Storage, SHA-256
    idempotency, acquisition method (R1-003).
-3. - [ ] `source_rows` (raw, immutable) + row validation → `row_exceptions` (missing/invalid
+3. - [x] `source_rows` (raw, immutable) + row validation → `row_exceptions` (missing/invalid
    commodity code, weight, tax point inputs, origin, value, supplier mapping) (R1-025).
+   *Partial until later phases: supplier mapping against the register arrives in Phase 6 (only
+   an empty supplier is flagged now), and procedure-code (tax-point input) checks arrive with
+   Phase 4; commodity-code shape is provisional (DATA-DEC-024).*
 4. - [ ] Normalise into `declarations`, `import_lines`, `parties` with exact commodity code,
    net mass kg (6 dp), customs value + valuation basis, origin as declared (R1-005, R1-010).
 5. - [ ] Importer / declarant / agent / acting-on-behalf relationships (R1-006).
@@ -178,7 +184,7 @@ clock, money, decisions, tasks.
    every cell that came from an uploaded file (docs/SECURITY.md files checklist).
 
 **Exit gate**
-- [ ] **500-row CDS file imports cleanly with errors reported per row** (handbook gate)
+- [ ] **500-row CDS file imports cleanly with errors reported per row** (handbook gate) — *row validation, raw rows and the exception report are proven by IMP-10 (500 rows, 37 seeded bad rows, synthetic provisional layout); tick when step 4 normalises the valid rows and the layout is the real one*
 - [ ] A year of fixture "Get customs data" reports loads without duplicates and a missing window shows as a gap with a task
 - [ ] Replaying a file creates no duplicate business records
 - [ ] Every line links to its exact source row and file
@@ -225,6 +231,7 @@ clock, money, decisions, tasks.
 1. - [ ] Un-skip TH-01…TH-11; implement `threshold/rules.py`: forward test (any day, 30 days
    ahead, uses forecast inputs), backward test (1st of month, prior 12 months, 2027
    floor), earliest-date combination, exclusions of out-of-scope / excluded / flagged lines.
+*Note (REG-DEC-023): batches with rejected rows must make the threshold conclusion show as incomplete, not "below threshold", until the rows are resolved or ruled out of scope.*
 2. - [ ] Minimal forecast input (expected tax point + value + source) to feed the forward test
    (full versioned register is R1-037 in Phase 10).
 3. - [ ] `threshold_snapshots` + `threshold_events` with decision IDs; snapshot stores the

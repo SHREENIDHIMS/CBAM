@@ -24,6 +24,7 @@ from app.core.tenancy import get_engine_dep, get_verifier
 from app.main import create_app
 from app.modules.imports import service
 from app.modules.imports.api import _capped
+from app.modules.imports.jobs import get_enqueuer
 from tests.helpers_auth import bearer, verifier
 from tests.integration.conftest import make_member, make_tenant, make_user
 
@@ -49,6 +50,7 @@ def store() -> InMemoryStore:
 @pytest.fixture
 def client(app_engine: Engine, store: InMemoryStore) -> Iterator[TestClient]:
     app = create_app()
+    app.dependency_overrides[get_enqueuer] = lambda: lambda tenant_id, batch_id: None
     app.dependency_overrides[get_verifier] = verifier
     app.dependency_overrides[get_engine_dep] = lambda: app_engine
     app.dependency_overrides[get_clock] = lambda: FrozenClock(NOW)
