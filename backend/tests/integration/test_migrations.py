@@ -169,10 +169,21 @@ def test_0011_the_impact_reader_role_cannot_be_used_by_anyone_else_and_the_funct
     command.upgrade(cfg, "head")
     assert (
         _scalar(
-            "select rolcanlogin or rolinherit or rolbypassrls or rolsuper "
-            "from pg_roles where rolname = 'cbam_impact_reader'"
+            "select rolcanlogin or rolinherit or rolbypassrls or rolsuper or rolcreaterole "
+            "or rolcreatedb or rolreplication from pg_roles where rolname = 'cbam_impact_reader'"
         )
         is False
+    )
+    # no member can SET ROLE into it or inherit it; ADMIN OPTION only for roles that already
+    # control roles (the migration user, a superuser or a CREATEROLE role)
+    assert (
+        _scalar(
+            "select count(*) from pg_auth_members m join pg_roles r on r.oid = m.member "
+            "where m.roleid = 'cbam_impact_reader'::regrole and (m.set_option or m.inherit_option "
+            "or (m.admin_option and r.rolname <> current_user "
+            "and not (r.rolsuper or r.rolcreaterole)))"
+        )
+        == 0
     )
     for member in ("cbam_app", "cbam_owner"):
         assert _scalar(f"select pg_has_role('{member}', 'cbam_impact_reader', 'USAGE')") is False

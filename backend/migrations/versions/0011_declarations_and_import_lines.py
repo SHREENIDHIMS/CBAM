@@ -233,15 +233,18 @@ begin
   if not exists (select from pg_roles where rolname = 'cbam_impact_reader') then
     create role cbam_impact_reader nologin noinherit nobypassrls;
   end if;
-  -- Correct a pre-existing role too: it must never be able to log in, inherit or bypass RLS.
+  -- Correct a pre-existing role too when this user is permitted to ...
   begin
-    alter role cbam_impact_reader nologin noinherit nobypassrls;
+    alter role cbam_impact_reader nologin noinherit nobypassrls nosuperuser nocreaterole
+      nocreatedb noreplication;
   exception when insufficient_privilege then
-    if exists (select from pg_roles where rolname = 'cbam_impact_reader'
-               and (rolcanlogin or rolinherit or rolbypassrls or rolsuper)) then
-      raise exception 'role cbam_impact_reader has unsafe attributes and this user cannot fix them';
-    end if;
+    null;  -- ... and in every case check the result below.
   end;
+  if exists (select from pg_roles where rolname = 'cbam_impact_reader'
+             and (rolcanlogin or rolinherit or rolbypassrls or rolsuper or rolcreaterole
+                  or rolcreatedb or rolreplication)) then
+    raise exception 'role cbam_impact_reader has unsafe attributes and this user cannot fix them';
+  end if;
 end $$;
 """
 
@@ -260,6 +263,7 @@ _REVOKE_MEMBERSHIP = """
 do $$
 declare
   g record;
+  n integer;
 begin
   for g in select pg_get_userbyid(m.grantor) as grantor from pg_auth_members m
             where m.roleid = 'cbam_impact_reader'::regrole and m.member = 'cbam_owner'::regrole
@@ -273,6 +277,19 @@ begin
   if pg_has_role('cbam_owner', 'cbam_impact_reader', 'member') then
     raise exception 'cbam_owner is still a member of cbam_impact_reader (granted by another '
       'role): remove that membership as a superuser or as the role that granted it';
+  end if;
+  -- Nobody may be able to SET ROLE into the reader or inherit it. ADMIN OPTION is allowed only
+  -- for the migration user or a role that already controls roles (superuser or CREATEROLE).
+  if current_setting('server_version_num')::int >= 160000 then
+    execute
+      'select count(*) from pg_auth_members m join pg_roles r on r.oid = m.member'
+      ' where m.roleid = ''cbam_impact_reader''::regrole and (m.set_option or m.inherit_option'
+      ' or (m.admin_option and r.rolname <> current_user and not (r.rolsuper or r.rolcreaterole)))'
+      into n;
+    if n > 0 then
+      raise exception 'cbam_impact_reader has a member that can SET ROLE into it, inherit it or '
+        'administer it';
+    end if;
   end if;
 end $$;
 """

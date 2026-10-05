@@ -120,7 +120,7 @@ permissions); IMP-51 to IMP-53 lease owner token, release after a handled failur
 margin, time-based renewal; IMP-54 stale overlapping files, corrections and older extracts never
 supersede newer facts; IMP-55 every line shows the CURRENT declaration; IMP-56 the impact report
 shows totals to a platform admin and clients to a domain owner; IMP-57 a job that lost its lease
-cannot complete or reject; IMP-60 the conflict pre-pass is idempotent on resume (one audit event). `test_migrations.py` checks the impact role (NOLOGIN, NOINHERIT, no members), the hash_version CHECK and that the guarded function works in platform mode. `test_rls.py` has an allow-list of every policy that is not plain
+cannot complete or reject; IMP-60 the conflict pre-pass is idempotent on resume (one audit event). `test_migrations.py` checks the impact role (no login, inherit, bypass-RLS, superuser, create-role, create-db or replication attribute; `cbam_app` and `cbam_owner` are not members; no member can SET ROLE into it or inherit it, and ADMIN OPTION is held only by the migration user or a role that already controls roles), the hash_version CHECK and that the guarded function works in platform mode. `test_rls.py` has an allow-list of every policy that is not plain
 tenant isolation.
 
 ### Portal extras (R1-055, R1-056)
