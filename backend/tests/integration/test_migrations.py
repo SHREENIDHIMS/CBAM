@@ -11,7 +11,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import create_engine, text
+from sqlalchemy import Engine, create_engine, text
 
 TEST_URL = os.environ.get("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not TEST_URL, reason="TEST_DATABASE_URL not set")
@@ -182,15 +182,23 @@ def test_0011_the_impact_reader_role_cannot_be_used_by_anyone_else_and_the_funct
     assert _scalar("select pg_has_role('cbam_owner', 'cbam_impact_reader', 'MEMBER')") is False
     command.upgrade(cfg, "head")
     assert _scalar("select pg_has_role('cbam_owner', 'cbam_impact_reader', 'MEMBER')") is False
-    assert TEST_URL
-    with create_engine(TEST_URL).begin() as conn:
-        conn.execute(text("select set_config('app.is_platform', 'on', true)"))
-        rows = conn.execute(
+
+
+def test_0011_the_guarded_function_works_for_the_app_role_in_platform_mode(
+    app_engine: Engine,
+) -> None:
+    from app.core.db import tenant_session
+
+    with tenant_session(app_engine, tenant_id=None, platform=True) as s:
+        rows = s.execute(
             text("select * from cbam.impact_line_counts_by_code_prefix(array['72'])")
         ).all()
-    assert rows == [] or all(len(r) == 3 for r in rows)  # counts only, in platform mode
-    with create_engine(TEST_URL).begin() as conn, pytest.raises(Exception, match="platform"):
-        conn.execute(text("select * from cbam.impact_line_counts_by_code_prefix(array['72'])"))
+    assert all(len(r) == 3 for r in rows)  # (prefix, tenant_id, count): counts only
+    with (
+        pytest.raises(Exception, match="platform"),
+        tenant_session(app_engine, tenant_id=None) as s,
+    ):
+        s.execute(text("select * from cbam.impact_line_counts_by_code_prefix(array['72'])"))
 
 
 def test_0011_hash_version_only_accepts_known_versions(monkeypatch: pytest.MonkeyPatch) -> None:
