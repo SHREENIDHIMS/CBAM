@@ -890,6 +890,11 @@ def content_hash(parts: Mapping[str, object]) -> str:
 class NormalisationContext:
     batch_eori: str | None  # the EORI declared for the batch, used when the row has none
     entry_method: str
+    # How the facts were derived (R1-010). A file's rows are `declared`; a hand-keyed entry is
+    # `manual` and then MUST carry the reason it was keyed (a database check enforces it).
+    value_source: str = "declared"
+    override_reason: str | None = None
+    change_reason: str = REASON_SOURCE_CHANGED  # recorded when a new version supersedes one
 
 
 @dataclass(frozen=True)
@@ -1074,7 +1079,7 @@ def normalise_row(row: MappedRow, ctx: NormalisationContext) -> NormalisationRes
         customs_value_gbp=gbp,
         customs_value_gbp_note=note,
         valuation_basis=basis,
-        value_source="declared",
+        value_source=ctx.value_source,
         country_of_origin_declared=origin,
         cpc=cpc,
         content_sha256=line_hash,
@@ -1160,10 +1165,8 @@ def reconcile_version(
 
 
 def check_value_correction(permissions: frozenset[str], reason: str | None) -> Decision:
-    """R1-010: a customs-value correction needs `imports:correct` and a written reason. The
-    correction endpoint is not built yet (it is a later Phase 3 step, after the liable-person rule
-    and manual entry); the rule lives here so the guard exists before the endpoint does.
-    ALLOWED or BLOCKED."""
+    """R1-010: a customs-value correction needs `imports:correct` and a written reason
+    (`POST /import-lines/{id}/corrections` applies it). ALLOWED or BLOCKED."""
     if "imports:correct" not in permissions:
         return Decision(
             rule_id="R1-010.value_correction",
@@ -1186,4 +1189,77 @@ def check_value_correction(permissions: frozenset[str], reason: str | None) -> D
         source_ids=(),
         outcome="ALLOWED",
         reason="permission and reason present",
+    )
+
+
+REASON_VALUE_CORRECTED = "value_corrected"
+
+
+def parse_corrected_value(value: str, currency: str) -> tuple[Decimal | None, tuple[Issue, ...]]:
+    """The corrected customs value as a Decimal with the same shape checks a file row gets
+    (plain digits, at most the stored precision, a non-negative amount, a three-letter currency),
+    or the issues that stop it. Never rounds."""
+    row = MappedRow(
+        values={"line.customs_value": value, "line.customs_value_currency": currency},
+        required=frozenset({"line.customs_value", "line.customs_value_currency"}),
+        date_formats={},
+        mapped=frozenset({"line.customs_value", "line.customs_value_currency"}),
+    )
+    issues = validate_row(row)
+    if not row_is_valid(issues):
+        return None, issues
+    amount, _ = parse_plain_decimal(value.strip(), int_digits=_VALUE_INT_DIGITS, scale=_VALUE_SCALE)
+    return amount, issues
+
+
+# --- manual entry (R1-004) -------------------------------------------------------------------
+# A keyed entry goes through the SAME validation and normalisation as a file row. It is read
+# through an identity layout (each column is named after the canonical field it fills), so no
+# second set of checks exists. This layout is product vocabulary, not a customs report layout and
+# not law; the date is always ISO (`2027-01-05`) because a form has no regional format.
+
+RULE_MANUAL_ENTRY = "R1-004.manual_entry"
+REASON_MANUAL_ENTRY = "manual_entry"
+MANUAL_DATE_FORMAT = "%Y-%m-%d"
+MANUAL_REASON_KEY = "entry_reason"
+MANUAL_REASON_MAX = 1000
+
+
+def manual_layout() -> tuple[LayoutColumn, ...]:
+    """One column per canonical field; the item fields a line needs are required."""
+    return tuple(
+        LayoutColumn(
+            name=field,
+            maps_to=field,
+            required=field in LINE_FIELDS,
+            date_format=MANUAL_DATE_FORMAT if field == "declaration.acceptance_date" else None,
+        )
+        for field in sorted(CANONICAL_FIELDS)
+    )
+
+
+def manual_raw(values: Mapping[str, str | None], reason: str) -> dict[str, str]:
+    """The raw row of a keyed entry: the canonical field -> text as typed (blank fields left out)
+    plus the reason. Stored as the source row, so the keyed facts keep their lineage."""
+    raw = {k: v.strip() for k, v in values.items() if v is not None and v.strip()}
+    raw[MANUAL_REASON_KEY] = reason.strip()
+    return raw
+
+
+def check_manual_reason(reason: str | None) -> Decision:
+    """R1-004: a keyed entry needs a written reason of 1 to 1000 characters. ALLOWED or BLOCKED."""
+    if reason is None or not reason.strip() or len(reason.strip()) > MANUAL_REASON_MAX:
+        return Decision(
+            rule_id=RULE_MANUAL_ENTRY,
+            rule_version=RULE_VERSION,
+            source_ids=(),
+            outcome="BLOCKED",
+            reason="a manual entry needs a reason of 1 to 1000 characters",
+        )
+    return Decision(
+        rule_id=RULE_MANUAL_ENTRY,
+        rule_version=RULE_VERSION,
+        source_ids=(),
+        outcome="ALLOWED",
+        reason="reason present",
     )
