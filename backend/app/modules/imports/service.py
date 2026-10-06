@@ -2,6 +2,7 @@
 audit event in one transaction (R1-003). Replaying the same file creates nothing new."""
 
 import hashlib
+import re
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, suppress
@@ -186,6 +187,37 @@ def _find_replay(
         if by_key is not None:
             raise IdempotencyConflictError("This Idempotency-Key was used for a different file")
     return None
+
+
+_KEY_SHAPE = re.compile(r"^[\x21-\x7e]{1,200}$")
+
+
+def check_idempotency_key(key: str | None) -> str | None:
+    """The key as sent, or None; a malformed one is a 422."""
+    if key is not None and not _KEY_SHAPE.match(key):
+        raise InvalidRequestError("Idempotency-Key must be 1 to 200 visible ASCII characters")
+    return key
+
+
+def find_keyed_batch(
+    session: Session, *, tenant_id: UUID, key: str, fingerprint: bytes
+) -> Row[Any] | None:
+    """The live batch an earlier request with this Idempotency-Key made, or None. The same key
+    with a different request is a 409 (as for file uploads). Serialised per key, so two parallel
+    requests with one key cannot both create."""
+    _lock(session, tenant_id, "key", key)
+    existing = session.execute(
+        select(import_batches).where(
+            import_batches.c.tenant_id == tenant_id,
+            import_batches.c.idempotency_key == key,
+            import_batches.c.status.not_in(rules.HISTORY_STATES),
+        )
+    ).one_or_none()
+    if existing is None:
+        return None
+    if bytes(existing.request_fingerprint) != fingerprint:
+        raise IdempotencyConflictError("This Idempotency-Key was used for a different request")
+    return existing
 
 
 def receive_file(

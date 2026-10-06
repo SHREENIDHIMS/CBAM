@@ -204,7 +204,7 @@ clock, money, decisions, tasks.
 - [ ] A year of fixture "Get customs data" reports loads without duplicates and a missing window shows as a gap with a task
 - [x] Replaying a file creates no duplicate business records
 - [x] Every line links to its exact source row and file
-- [x] Freight-forwarder-as-declarant fixture keeps importer liable — *proven on the invented fixture rules (LP-04, LP-22); real rules need LEGAL-DEC-019*
+- [ ] Freight-forwarder-as-declarant fixture keeps importer liable — *blocked on LEGAL-DEC-019: the fixture rows are invented and the case is not legally coherent yet (a forwarder's representation type and liability are the open question); LP-04 and LP-22 only exercise the engine*
 
 ---
 

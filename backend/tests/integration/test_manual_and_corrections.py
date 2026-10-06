@@ -49,6 +49,11 @@ def entry(**changes: Any) -> dict[str, Any]:
     return body
 
 
+def ver(headers: dict[str, str], version: int = 1) -> dict[str, str]:
+    """Request headers plus If-Match carrying the line version the user saw (R1-045)."""
+    return {**headers, "If-Match": f'"{version}"'}
+
+
 def q(engine: Engine, tenant: UUID, statement: str, **params: object) -> list[Any]:
     with tenant_session(engine, tenant_id=tenant) as s:
         return list(s.execute(text(statement), params).all())
@@ -183,39 +188,56 @@ def test_man_04_keying_the_same_facts_twice_adds_no_second_line(
     assert n(app_engine, tenant, "import_batches", "lines_unchanged = 1") == 1
 
 
-def test_man_05_a_keyed_value_supersedes_a_file_line_and_a_later_file_cannot_undo_it(
+def test_man_05_a_keyed_value_cannot_replace_a_file_line_and_nothing_is_left_behind(
     client: TestClient, app_engine: Engine, store: InMemoryStore, layout: UUID
 ) -> None:
+    """R1-004 / R1-010: manual entry needs only imports:write, so it must never override file
+    data; the correction route (imports:correct) is the only way to change a file line."""
     tenant = make_tenant(app_engine, "A")
     ops = user_for(app_engine, tenant, "operations")
     load_file(app_engine, store, tenant, [good_row(1)])
+    batches = n(app_engine, tenant, "import_batches")
     keyed = entry(mrn=FILE_MRN, customs_value="9.99", customs_value_currency="EUR")
     res = client.post(f"{base(tenant)}/manual", json=keyed, headers=ops)
-    assert res.status_code == 201, res.text
-    assert (res.json()["result"], res.json()["version"]) == ("superseded", 2)
-    versions = q(
-        app_engine,
-        tenant,
-        "select version, entry_method, value_source, change_reason from cbam.import_lines"
-        " order by version",
-    )
-    assert [tuple(v) for v in versions] == [
-        (1, "gcd", "declared", None),
-        (2, "manual", "manual", "manual_entry"),
-    ]
-    # a different file value is NOT allowed to replace the keyed one
+    assert res.status_code == 409, res.text
+    assert "MANUAL_ENTRY_OVER_FILE" in {e["code"] for e in res.json()["errors"]}
+    assert "correction" in res.json()["detail"]
+    assert n(app_engine, tenant, "import_batches") == batches
+    assert (n(app_engine, tenant, "import_lines"), n(app_engine, tenant, "declarations")) == (1, 1)
+    # the file's own next report is not blocked by anything keyed by hand
     changed = good_row(1)
     changed[6] = "777.00"
-    batch = receive(app_engine, store, tenant, to_csv([changed]))
-    assert run(app_engine, store, tenant, batch.id) == "completed_with_errors"
-    codes = q(app_engine, tenant, "select code from cbam.row_exceptions")
-    assert [c.code for c in codes] == ["SOURCE_CONFLICTS_WITH_CORRECTION"]
-    assert n(app_engine, tenant, "import_lines") == 2
-    # the original file value again is only a sighting of version 1
-    again = receive(app_engine, store, tenant, to_csv([good_row(1), good_row(2)]))
+    again = receive(app_engine, store, tenant, to_csv([changed]))
     assert run(app_engine, store, tenant, again.id) == "completed"
-    assert n(app_engine, tenant, "import_lines", "item_no = 2") == 1
-    assert n(app_engine, tenant, "import_lines") == 3
+    assert n(app_engine, tenant, "row_exceptions") == 0
+    assert n(app_engine, tenant, "import_lines", "version = 2 and entry_method <> 'manual'") == 1
+
+
+def test_man_05b_a_keyed_header_that_differs_from_a_file_declaration_is_refused(
+    client: TestClient, app_engine: Engine, store: InMemoryStore, layout: UUID
+) -> None:
+    """R1-004: a new item on a file declaration may only be keyed under the SAME header; a
+    different importer EORI, representation type or acceptance date is refused."""
+    tenant = make_tenant(app_engine, "A")
+    ops = user_for(app_engine, tenant, "operations")
+    load_file(app_engine, store, tenant, [good_row(1)])
+    for change in (
+        {"importer_eori": "GB999999999999"},
+        {"declarant_eori": "GB210987654321"},
+        {"representative_eori": "GB210987654321"},
+        {"representation_type": "indirect"},
+        {"acceptance_date": "2027-01-06"},
+    ):
+        res = client.post(
+            f"{base(tenant)}/manual", json=entry(mrn=FILE_MRN, item_no=2, **change), headers=ops
+        )
+        assert res.status_code == 409, (change, res.text)
+        assert res.json()["errors"][0]["code"] == "MANUAL_ENTRY_OVER_FILE"
+    assert (n(app_engine, tenant, "import_lines"), n(app_engine, tenant, "declarations")) == (1, 1)
+    # the same header with a NEW item changes nothing that came from the file
+    ok = client.post(f"{base(tenant)}/manual", json=entry(mrn=FILE_MRN, item_no=2), headers=ops)
+    assert ok.status_code == 201, ok.text
+    assert (n(app_engine, tenant, "import_lines"), n(app_engine, tenant, "declarations")) == (2, 1)
 
 
 def test_man_06_a_second_different_keyed_value_is_refused_and_leaves_nothing(
@@ -299,7 +321,7 @@ def test_cor_01_a_correction_is_a_new_version_and_the_original_stays(
     res = client.post(
         f"{base(tenant)}/{line}/corrections",
         json={"reason": "Invoice shows a different value", "customs_value": "1000.00"},
-        headers=ops,
+        headers=ver(ops),
     )
     assert res.status_code == 201, res.text
     body = res.json()
@@ -357,7 +379,7 @@ def test_cor_02_correcting_the_currency_to_gbp_sets_the_gbp_value_exactly(
             "customs_value": "820.10",
             "customs_value_currency": "GBP",
         },
-        headers=ops,
+        headers=ver(ops),
     )
     assert res.status_code == 201, res.text
     assert (res.json()["customs_value_currency"], res.json()["customs_value_gbp"]) == (
@@ -375,12 +397,12 @@ def test_cor_03_a_tax_agent_cannot_correct_and_a_reason_is_required(
     url = f"{base(tenant)}/{line}/corrections"
     agent = user_for(app_engine, tenant, "tax_agent")
     assert (
-        client.post(url, json={"reason": "x", "customs_value": "1"}, headers=agent).status_code
+        client.post(url, json={"reason": "x", "customs_value": "1"}, headers=ver(agent)).status_code
         == 403
     )
     ops = user_for(app_engine, tenant, "operations")
     for reason in ("", "   "):
-        res = client.post(url, json={"reason": reason, "customs_value": "1"}, headers=ops)
+        res = client.post(url, json={"reason": reason, "customs_value": "1"}, headers=ver(ops))
         assert res.status_code == 422, res.text
     assert n(app_engine, tenant, "import_lines") == 1
 
@@ -393,14 +415,14 @@ def test_cor_04_invalid_or_unchanged_values_are_refused(
     load_file(app_engine, store, tenant, [good_row(1)])
     url = f"{base(tenant)}/{first_line(app_engine, tenant)}/corrections"
     for value in ("abc", "-5", "1e3", "", "1.123456789"):
-        res = client.post(url, json={"reason": "fix", "customs_value": value}, headers=ops)
+        res = client.post(url, json={"reason": "fix", "customs_value": value}, headers=ver(ops))
         assert res.status_code == 422, (value, res.text)
-    same = client.post(url, json={"reason": "fix", "customs_value": "1234.56"}, headers=ops)
+    same = client.post(url, json={"reason": "fix", "customs_value": "1234.56"}, headers=ver(ops))
     assert same.status_code == 422 and "nothing to change" in same.json()["detail"]
     badccy = client.post(
         url,
         json={"reason": "fix", "customs_value": "5", "customs_value_currency": "euro"},
-        headers=ops,
+        headers=ver(ops),
     )
     assert badccy.status_code == 422
     assert n(app_engine, tenant, "import_lines") == 1
@@ -415,9 +437,10 @@ def test_cor_05_only_the_current_version_can_be_corrected(
     old = first_line(app_engine, tenant)
     url = f"{base(tenant)}/{old}/corrections"
     assert (
-        client.post(url, json={"reason": "r", "customs_value": "5"}, headers=ops).status_code == 201
+        client.post(url, json={"reason": "r", "customs_value": "5"}, headers=ver(ops)).status_code
+        == 201
     )
-    stale = client.post(url, json={"reason": "r", "customs_value": "6"}, headers=ops)
+    stale = client.post(url, json={"reason": "r", "customs_value": "6"}, headers=ver(ops))
     assert stale.status_code == 409, stale.text
     assert n(app_engine, tenant, "import_lines") == 2
     # correcting the new current version works and extends the chain
@@ -425,7 +448,7 @@ def test_cor_05_only_the_current_version_can_be_corrected(
     again = client.post(
         f"{base(tenant)}/{current}/corrections",
         json={"reason": "second fix", "customs_value": "6"},
-        headers=ops,
+        headers=ver(ops, 2),
     )
     assert again.status_code == 201 and again.json()["version"] == 3
 
@@ -439,7 +462,7 @@ def test_cor_06_a_later_file_cannot_undo_a_correction(
     client.post(
         f"{base(tenant)}/{first_line(app_engine, tenant)}/corrections",
         json={"reason": "invoice", "customs_value": "50.00"},
-        headers=ops,
+        headers=ver(ops),
     )
     # the same original row again: only a sighting, no new version
     replay = receive(app_engine, store, tenant, to_csv([good_row(1), good_row(2)]))
@@ -464,7 +487,7 @@ def test_cor_07_other_clients_cannot_see_or_correct_a_line(
     res = client.post(
         f"{base(b)}/{line}/corrections",
         json={"reason": "r", "customs_value": "5"},
-        headers=stranger,
+        headers=ver(stranger),
     )
     assert res.status_code == 404
     assert n(app_engine, a, "import_lines") == 1
@@ -479,7 +502,7 @@ def test_cor_08_the_ledger_shows_corrections_and_filters_by_entry_method(
     client.post(
         f"{base(tenant)}/{first_line(app_engine, tenant)}/corrections",
         json={"reason": "r", "customs_value": "5"},
-        headers=ops,
+        headers=ver(ops),
     )
     page = client.get(f"{base(tenant)}?entry_method=correction", headers=ops).json()
     assert [(i["version"], i["entry_method"]) for i in page["items"]] == [(2, "correction")]
@@ -497,7 +520,80 @@ def test_cor_09_the_audit_chain_still_verifies_after_manual_entries_and_correcti
     client.post(
         f"{base(tenant)}/{first_line(app_engine, tenant)}/corrections",
         json={"reason": "r", "customs_value": "5"},
-        headers=ops,
+        headers=ver(ops),
     )
     with tenant_session(app_engine, tenant_id=tenant) as s:
         assert verify_chain(s, tenant).ok
+
+
+# --- concurrency and idempotency (docs/API_SPEC.md: If-Match, Idempotency-Key) ---------------
+
+
+def test_cor_10_r1_010_a_correction_needs_if_match_with_the_version_the_user_saw(
+    client: TestClient, app_engine: Engine, store: InMemoryStore, layout: UUID
+) -> None:
+    tenant = make_tenant(app_engine, "A")
+    ops = user_for(app_engine, tenant, "operations")
+    load_file(app_engine, store, tenant, [good_row(1)])
+    url = f"{base(tenant)}/{first_line(app_engine, tenant)}/corrections"
+    body = {"reason": "invoice", "customs_value": "50.00"}
+    assert client.post(url, json=body, headers=ops).status_code == 428
+    assert client.post(url, json=body, headers=ver(ops, 7)).status_code == 409
+    assert n(app_engine, tenant, "import_lines") == 1
+    ok = client.post(url, json=body, headers=ver(ops))
+    assert ok.status_code == 201 and ok.headers["ETag"] == '"2"'
+
+
+def test_cor_11_r1_010_the_same_idempotency_key_replays_and_a_different_body_conflicts(
+    client: TestClient, app_engine: Engine, store: InMemoryStore, layout: UUID
+) -> None:
+    tenant = make_tenant(app_engine, "A")
+    ops = user_for(app_engine, tenant, "operations")
+    load_file(app_engine, store, tenant, [good_row(1)])
+    url = f"{base(tenant)}/{first_line(app_engine, tenant)}/corrections"
+    headers = {**ver(ops), "Idempotency-Key": "cor-key-1"}
+    body = {"reason": "invoice", "customs_value": "50.00"}
+    first = client.post(url, json=body, headers=headers)
+    assert first.status_code == 201, first.text
+    again = client.post(url, json=body, headers=headers)
+    assert again.status_code == 200, again.text
+    assert again.json()["line_id"] == first.json()["line_id"] and again.json()["replayed"]
+    assert n(app_engine, tenant, "import_lines") == 2
+    other = client.post(url, json={**body, "customs_value": "51.00"}, headers=headers)
+    assert other.status_code == 409
+    bad = client.post(url, json=body, headers={**ver(ops), "Idempotency-Key": "has space"})
+    assert bad.status_code == 422
+    assert n(app_engine, tenant, "import_lines") == 2
+
+
+def test_man_10_r1_004_the_same_idempotency_key_replays_and_a_different_entry_conflicts(
+    client: TestClient, app_engine: Engine, layout: UUID
+) -> None:
+    tenant = make_tenant(app_engine, "A")
+    ops = user_for(app_engine, tenant, "operations")
+    headers = {**ops, "Idempotency-Key": "man-key-1"}
+    first = client.post(f"{base(tenant)}/manual", json=entry(), headers=headers)
+    assert first.status_code == 201, first.text
+    again = client.post(f"{base(tenant)}/manual", json=entry(), headers=headers)
+    assert again.status_code == 200, again.text
+    assert again.json()["line_id"] == first.json()["line_id"]
+    assert again.json()["batch_id"] == first.json()["batch_id"] and again.json()["replayed"]
+    other = client.post(f"{base(tenant)}/manual", json=entry(customs_value="5.00"), headers=headers)
+    assert other.status_code == 409
+    assert (n(app_engine, tenant, "import_batches"), n(app_engine, tenant, "import_lines")) == (
+        1,
+        1,
+    )
+    # a refused or invalid entry never uses up its key
+    bad = client.post(
+        f"{base(tenant)}/manual",
+        json=entry(commodity_code="7"),
+        headers={**ops, "Idempotency-Key": "man-key-2"},
+    )
+    assert bad.status_code == 422
+    good = client.post(
+        f"{base(tenant)}/manual",
+        json=entry(mrn="MRN-MANUAL-0002"),
+        headers={**ops, "Idempotency-Key": "man-key-2"},
+    )
+    assert good.status_code == 201

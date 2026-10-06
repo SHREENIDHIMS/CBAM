@@ -291,6 +291,11 @@ ISSUES: dict[str, tuple[str, str]] = {
         "This row differs from a value that was corrected or entered by hand. It was not "
         "applied; a reviewer must decide which value stands.",
     ),
+    "MANUAL_ENTRY_OVER_FILE": (
+        "error",
+        "This declaration or line came from a customs file. A manual entry cannot change it: "
+        "use a correction instead.",
+    ),
     "OLDER_EXTRACT_CONFLICT": (
         "error",
         "This row differs from facts taken from a more recent report. It was not applied; "
@@ -886,6 +891,10 @@ def content_hash(parts: Mapping[str, object]) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
+IMPORTER_DECLARED = "declared"
+IMPORTER_FALLBACK = "batch_fallback"
+
+
 @dataclass(frozen=True)
 class NormalisationContext:
     batch_eori: str | None  # the EORI declared for the batch, used when the row has none
@@ -907,6 +916,9 @@ class DeclarationFacts:
     representation_type: str  # self | direct | indirect | unknown (never inferred)
     eori_context: str | None
     content_sha256: str
+    # `declared` (the row named the importer), `batch_fallback` (taken from the batch's EORI, an
+    # inference the liable-person engine must not rely on, R1-036) or None (no importer at all).
+    importer_eori_source: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1020,6 +1032,7 @@ def normalise_row(row: MappedRow, ctx: NormalisationContext) -> NormalisationRes
             "declaration.representative_eori",
         )
     }
+    importer_declared = eoris["declaration.eori"] is not None
     eoris["declaration.eori"] = eoris["declaration.eori"] or ctx.batch_eori
     issues.extend(
         Issue("EORI_INVALID", field) for field, v in eoris.items() if v and _check_eori(v)
@@ -1028,16 +1041,20 @@ def normalise_row(row: MappedRow, ctx: NormalisationContext) -> NormalisationRes
         return NormalisationResult(None, tuple(issues))
 
     importer = eoris["declaration.eori"]
-    decl_hash = content_hash(
-        {
-            "mrn": mrn,
-            "acceptance_date": accepted,
-            "importer_eori": importer,
-            "declarant_eori": eoris["declaration.declarant_eori"],
-            "representative_eori": eoris["declaration.representative_eori"],
-            "representation_type": kind,
-        }
+    importer_source = (
+        None if importer is None else IMPORTER_DECLARED if importer_declared else IMPORTER_FALLBACK
     )
+    hashed: dict[str, object] = {
+        "mrn": mrn,
+        "acceptance_date": accepted,
+        "importer_eori": importer,
+        "declarant_eori": eoris["declaration.declarant_eori"],
+        "representative_eori": eoris["declaration.representative_eori"],
+        "representation_type": kind,
+    }
+    if importer_source == IMPORTER_FALLBACK:  # a declared importer keeps its original hash
+        hashed["importer_eori_source"] = importer_source
+    decl_hash = content_hash(hashed)
     declaration = DeclarationFacts(
         mrn=mrn,
         acceptance_date=accepted,
@@ -1047,6 +1064,7 @@ def normalise_row(row: MappedRow, ctx: NormalisationContext) -> NormalisationRes
         representation_type=kind,
         eori_context=parse_eori_context(importer),
         content_sha256=decl_hash,
+        importer_eori_source=importer_source,
     )
     gbp, note = customs_value_gbp(amount, currency)
     description = _text(row, "line.description")
@@ -1126,6 +1144,7 @@ def reconcile_version(
     incoming_hash: str,
     incoming_batch_id: object,
     incoming_recency: date,
+    incoming_entry_method: str | None = None,
 ) -> str:
     """What to do with a row whose key already has versions. Stale or hand-made data must never
     replace newer facts or a human's correction (CLAUDE.md rule 4):
@@ -1134,6 +1153,8 @@ def reconcile_version(
     - `same`: identical to the current version (only a sighting is recorded);
     - `seen_earlier`: identical to an EARLIER version (a stale overlapping file): only a sighting;
     - `blocked_by_correction`: the current version was corrected or keyed by hand: a human decides;
+    - `manual_over_file`: a hand-keyed entry differs from a version that came from a file; keying
+      never replaces file data (R1-004): the correction route (R1-010, `imports:correct`) does;
     - `older_extract`: the report is older than the one the current version came from: a human
       decides (equal recency lets the later-loaded report win);
     - `conflict`: two different versions inside one file (a data error);
@@ -1152,10 +1173,13 @@ def reconcile_version(
         return "same"
     if incoming_hash in earlier_hashes:
         return "seen_earlier"
-    if current_entry_method in CORRECTED_ENTRY_METHODS or current_value_source in (
+    corrected = current_entry_method in CORRECTED_ENTRY_METHODS or current_value_source in (
         "correction",
         "manual",
-    ):
+    )
+    if incoming_entry_method == "manual" and not corrected:
+        return "manual_over_file"
+    if corrected:
         return "blocked_by_correction"
     if incoming_batch_id == current_batch_id:
         return "conflict"

@@ -8,5 +8,5 @@ source_status: laid
 fixture: true
 effective_from: 2027-01-01
 effective_to: null
-checksum_sha256: 68533e9c74f33ae6b9268a9be59f4859ac50d2cdd43ff73b0c14bdfc2b71d1dc
+checksum_sha256: 34d28ce05792a5b4669648c9ccf6652aee0168cc9d721fa2139c7da516ff65fb
 notes: "Fixture only (test data, not law). Outcomes are invented to exercise the rule engine; LEGAL-DEC-019 is open."

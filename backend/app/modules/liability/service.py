@@ -40,7 +40,7 @@ def _load(session: Session, tenant_id: UUID, declaration_id: UUID) -> Any:
     row = session.execute(
         text(
             "select d.id, d.acceptance_date, d.representation_type, d.eori_context,"
-            " d.content_sha256, d.importer_party_id, d.declarant_party_id,"
+            " d.content_sha256, d.importer_eori_source, d.importer_party_id, d.declarant_party_id,"
             " d.representative_party_id, i.eori as importer_eori, c.eori as declarant_eori,"
             " r.eori as representative_eori,"
             " not exists (select 1 from cbam.declarations n"
@@ -142,6 +142,7 @@ def determine(
         representative_eori=row.representative_eori,
         representation_type=row.representation_type,
         eori_context=row.eori_context,
+        importer_eori_source=row.importer_eori_source,
     )
     decision = rules.determine(facts, snapshot.rows[DATASET])
     decision = replace(decision, details={**decision.details, "as_of_basis": AS_OF_BASIS})

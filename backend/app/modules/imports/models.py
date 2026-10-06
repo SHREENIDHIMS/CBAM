@@ -142,6 +142,7 @@ declarations = Table(
     Column("representative_party_id", Uuid),
     Column("representation_type", Text, nullable=False),
     Column("eori_context", Text),
+    Column("importer_eori_source", Text),
     Column("entry_method", Text, nullable=False),
     Column("batch_id", Uuid, nullable=False),
     Column("content_sha256", Text, nullable=False),

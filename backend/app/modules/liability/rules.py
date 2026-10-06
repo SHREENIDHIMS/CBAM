@@ -34,6 +34,10 @@ NO_MATCHING_RULE = "NO_MATCHING_RULE"
 AMBIGUOUS_RULES = "AMBIGUOUS_RULES"
 IMPORTER_UNKNOWN = "IMPORTER_UNKNOWN"
 LIABLE_PARTY_MISSING = "LIABLE_PARTY_MISSING"
+IMPORTER_INFERRED = "IMPORTER_INFERRED"
+
+# Provenance of the importer EORI (set by import normalisation). Anything else is not trusted.
+IMPORTER_DECLARED = "declared"
 
 _REASONS: Mapping[str, str] = {
     NO_ACTIVE_RULE: "no liable-person rule is active for this date: a person must decide",
@@ -41,6 +45,10 @@ _REASONS: Mapping[str, str] = {
     AMBIGUOUS_RULES: "more than one active liable-person rule matches: a person must decide",
     IMPORTER_UNKNOWN: "the importer is not known on this declaration: a person must decide",
     LIABLE_PARTY_MISSING: "the rule names a party this declaration lacks: a person must decide",
+    IMPORTER_INFERRED: (
+        "the importer was not stated on the declaration (it was taken from the batch): "
+        "a person must decide"
+    ),
 }
 
 
@@ -53,6 +61,7 @@ class DeclarationParties:
     representative_eori: str | None
     representation_type: str  # self | direct | indirect | unknown
     eori_context: str | None  # GB | XI, from the importer's EORI
+    importer_eori_source: str | None  # `declared` or `batch_fallback`; None = unknown
 
 
 def declarant_relation(facts: DeclarationParties) -> str:
@@ -69,8 +78,10 @@ def _matches(row: Mapping[str, Any], facts: DeclarationParties, relation: str) -
         return False
     if row["declarant_relation"] not in (relation, "any"):
         return False
+    # A row names the EORI context it covers (GB or XI). A blank one covers nothing: whether one
+    # row may serve both is part of the open LEGAL-DEC-019, and a blank must not match everything.
     context = row.get("eori_context")
-    return context is None or context == facts.eori_context
+    return bool(context) and context == facts.eori_context
 
 
 def _undetermined(code: str, **details: Any) -> Decision:
@@ -92,6 +103,8 @@ def determine(facts: DeclarationParties, rows: Sequence[Mapping[str, Any]]) -> D
         return _undetermined(NO_ACTIVE_RULE)
     if facts.importer_eori is None:
         return _undetermined(IMPORTER_UNKNOWN)
+    if facts.importer_eori_source != IMPORTER_DECLARED:
+        return _undetermined(IMPORTER_INFERRED)
     relation = declarant_relation(facts)
     matched = [r for r in rows if _matches(r, facts, relation)]
     if not matched:

@@ -37,7 +37,7 @@ from app.modules.imports.models import (
     import_lines,
     source_rows,
 )
-from app.modules.imports.service import Actor, advance_batch
+from app.modules.imports.service import Actor, advance_batch, find_keyed_batch
 
 _STORED_VALUE_SCALE = Decimal("0.00000001")  # customs_value_source is NUMERIC(24,8)
 
@@ -79,16 +79,37 @@ def correct_value(
     now: datetime,
     today: date,
     body: ValueCorrectionIn,
+    expected_version: int,
+    idempotency_key: str | None = None,
 ) -> ValueCorrectionOut:
+    """`expected_version` is the line version the user saw (If-Match); a newer one is a 409."""
     decision = rules.check_value_correction(permissions, body.reason)
     if decision.outcome == "BLOCKED":
         error = NotPermittedError if "imports:correct" not in permissions else ReasonRequiredError
         raise error(decision.reason)
     reason = body.reason.strip()
+    fingerprint = bytes.fromhex(
+        rules.row_hash(
+            {
+                "line_id": str(line_id),
+                "customs_value": body.customs_value.strip(),
+                "customs_value_currency": (body.customs_value_currency or "").strip(),
+                "reason": reason,
+            }
+        )
+    )
+    if idempotency_key:
+        earlier = find_keyed_batch(
+            session, tenant_id=tenant_id, key=idempotency_key, fingerprint=fingerprint
+        )
+        if earlier is not None:  # answered already: the old version is no longer current
+            return _replay(session, tenant_id, earlier.id)
 
     start = _current_line(session, tenant_id, line_id)
     normalisation._lock_mrns(session, tenant_id, [start.mrn])
     line = _current_line(session, tenant_id, line_id)  # re-read under the lock
+    if int(line.version) != expected_version:
+        raise StaleVersionError("This line changed since you loaded it: reload it and try again")
     successor = session.execute(
         text("select 1 from cbam.import_lines where tenant_id = :t and supersedes_id = :i"),
         {"t": tenant_id, "i": line_id},
@@ -150,7 +171,8 @@ def correct_value(
             tenant_id=tenant_id,
             acquisition_method="manual_entry",
             acquired_on=today,
-            request_fingerprint=bytes.fromhex(row_hash),
+            request_fingerprint=fingerprint,
+            idempotency_key=idempotency_key or None,
             status="received",
             created_at=now,
             created_by=actor.actor_id,
@@ -268,4 +290,28 @@ def correct_value(
         customs_value_source=_stored(amount),
         customs_value_currency=currency,
         customs_value_gbp=None if gbp is None else format(gbp, "f"),
+    )
+
+
+def _replay(session: Session, tenant_id: UUID, batch_id: UUID) -> ValueCorrectionOut:
+    row = session.execute(
+        text(
+            "select id, declaration_id, supersedes_id, version, customs_value_source,"
+            " customs_value_currency, customs_value_gbp from cbam.import_lines"
+            " where tenant_id = :t and batch_id = :b"
+        ),
+        {"t": tenant_id, "b": batch_id},
+    ).one()
+    return ValueCorrectionOut(
+        batch_id=batch_id,
+        declaration_id=row.declaration_id,
+        line_id=row.id,
+        superseded_line_id=row.supersedes_id,
+        version=int(row.version),
+        customs_value_source=_stored(row.customs_value_source),
+        customs_value_currency=row.customs_value_currency,
+        customs_value_gbp=None
+        if row.customs_value_gbp is None
+        else format(row.customs_value_gbp, "f"),
+        replayed=True,
     )

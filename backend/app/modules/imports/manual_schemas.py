@@ -49,6 +49,7 @@ class ManualEntryOut(BaseModel):
     # same facts were already there (nothing new, the keyed row is kept as a sighting).
     result: Literal["created", "superseded", "duplicate_seen"]
     warnings: list[EntryProblem]
+    replayed: bool = False  # true when an earlier request with the same Idempotency-Key answered
 
 
 class ValueCorrectionIn(BaseModel):
@@ -70,3 +71,4 @@ class ValueCorrectionOut(BaseModel):
     customs_value_source: str
     customs_value_currency: str
     customs_value_gbp: str | None
+    replayed: bool = False

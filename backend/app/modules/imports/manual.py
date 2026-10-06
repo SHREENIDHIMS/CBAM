@@ -5,9 +5,9 @@ facts are stored as an immutable source row (so lineage and the "raw" view work 
 and it goes through the SAME validation and normalisation as a file row (`rules.validate_row`,
 `rules.normalise_row`, `normalisation.normalise_chunk`). The line is stored with `entry_method =
 manual`, `value_source = manual` and the reason; everything downstream reads it like any other
-line. A manual entry that disagrees with a line another entry or a correction already settled is
-refused (a human's work is never silently replaced), and one that equals what is already there
-is only recorded as a sighting.
+line. A manual entry never changes a declaration or line that came from a file (409
+`MANUAL_ENTRY_OVER_FILE`: use a correction, R1-010), nor one another entry or a correction
+already settled; one that equals what is already there is only recorded as a sighting.
 
 Nothing here decides scope, tax point, quarter, threshold or the liable person.
 """
@@ -25,7 +25,7 @@ from app.core.ids import uuid7
 from app.modules.imports import normalisation, rules
 from app.modules.imports.manual_schemas import EntryProblem, ManualEntryIn, ManualEntryOut
 from app.modules.imports.models import import_batches, source_rows
-from app.modules.imports.service import Actor, advance_batch
+from app.modules.imports.service import Actor, advance_batch, find_keyed_batch
 
 REPORT_TYPE = "import_item"
 
@@ -92,12 +92,23 @@ def create_manual_entry(
     now: datetime,
     today: date,
     entry: ManualEntryIn,
+    idempotency_key: str | None = None,
 ) -> ManualEntryOut:
-    """Store one keyed line in the caller's transaction (all or nothing)."""
+    """Store one keyed line in the caller's transaction (all or nothing). The same
+    Idempotency-Key with the same entry answers again without storing anything."""
     raw, warnings = check_entry(entry)
     reason = entry.reason.strip()
     batch_id = uuid7()
     row_hash = rules.row_hash(raw)
+    if idempotency_key:
+        earlier = find_keyed_batch(
+            session,
+            tenant_id=tenant_id,
+            key=idempotency_key,
+            fingerprint=bytes.fromhex(row_hash),
+        )
+        if earlier is not None:
+            return _replay(session, tenant_id, earlier.id, warnings)
     session.execute(
         insert(import_batches).values(
             id=batch_id,
@@ -107,6 +118,7 @@ def create_manual_entry(
             eori=entry.importer_eori,
             acquired_on=today,
             request_fingerprint=bytes.fromhex(row_hash),
+            idempotency_key=idempotency_key or None,
             status="received",
             created_at=now,
             created_by=actor.actor_id,
@@ -151,11 +163,16 @@ def create_manual_entry(
     )
     if rejected:
         # Rolled back with the caller's transaction: a refused entry leaves nothing behind.
-        codes = sorted({i.code for _, _, i in rejected})
+        issues = [i for _, _, i in rejected]
+        codes = sorted({i.code for i in issues})
+        over_file = "MANUAL_ENTRY_OVER_FILE" in codes
         raise RuleBlockedError(
-            "A line or declaration with this reference was already settled by a correction or a "
-            f"manual entry, or by a newer report ({', '.join(codes)}): use a correction",
+            rules.issue_message("MANUAL_ENTRY_OVER_FILE")
+            if over_file
+            else "A line or declaration with this reference was already settled by a correction "
+            f"or a manual entry, or by a newer report ({', '.join(codes)}): use a correction",
             rule_id=rules.RULE_MANUAL_ENTRY,
+            errors=[_problem(i).model_dump() for i in issues],
         )
     line_id, declaration_id, version, result = _resulting_line(
         session, tenant_id, outcome, source_row_id
@@ -238,3 +255,33 @@ def _resulting_line(
         {"t": tenant_id, "i": line_id},
     ).one()
     return line_id, row.declaration_id, int(row.version), result
+
+
+def _replay(
+    session: Session, tenant_id: UUID, batch_id: UUID, warnings: list[EntryProblem]
+) -> ManualEntryOut:
+    found = session.execute(
+        text(
+            "select l.id, l.declaration_id, l.version, s.role from cbam.import_line_sources s"
+            " join cbam.source_rows r on r.tenant_id = s.tenant_id and r.id = s.source_row_id"
+            " join cbam.import_lines l on l.tenant_id = s.tenant_id and l.id = s.import_line_id"
+            " where s.tenant_id = :t and r.batch_id = :b"
+        ),
+        {"t": tenant_id, "b": batch_id},
+    ).one()
+    result = (
+        "duplicate_seen"
+        if found.role == "duplicate_seen"
+        else "superseded"
+        if found.version > 1
+        else "created"
+    )
+    return ManualEntryOut(
+        batch_id=batch_id,
+        declaration_id=found.declaration_id,
+        line_id=found.id,
+        version=int(found.version),
+        result=result,
+        warnings=warnings,
+        replayed=True,
+    )

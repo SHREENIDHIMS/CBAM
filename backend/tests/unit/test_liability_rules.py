@@ -1,9 +1,10 @@
-"""R1-036 liable-person rule engine. Scenario IDs LP-01 to LP-12.
+"""R1-036 liable-person rule engine. Scenario IDs LP-01 to LP-16.
 
 The rows below are TEST DATA: the outcomes are invented to exercise the engine and are not law
 (LEGAL-DEC-019 is open, so no real rule is loaded anywhere).
 """
 
+from dataclasses import fields
 from typing import Any
 
 from app.modules.liability import rules
@@ -27,9 +28,9 @@ def row(
 
 
 RULES = [
-    row("t.direct", "self", "same_as_importer", "importer"),
-    row("t.forwarder", "self", "different_from_importer", "importer"),
-    row("t.on_behalf", "direct", "any", "importer"),
+    row("t.direct", "self", "same_as_importer", "importer", "GB"),
+    row("t.forwarder", "self", "different_from_importer", "importer", "GB"),
+    row("t.on_behalf", "direct", "any", "importer", "GB"),
     row("t.indirect", "indirect", "any", "representative", "GB"),
 ]
 
@@ -41,8 +42,9 @@ def facts(
     representative: str | None = None,
     kind: str = "self",
     context: str | None = "GB",
+    source: str | None = "declared",
 ) -> rules.DeclarationParties:
-    return rules.DeclarationParties(importer, declarant, representative, kind, context)
+    return rules.DeclarationParties(importer, declarant, representative, kind, context, source)
 
 
 def test_lp_01_no_active_rule_is_undetermined_never_the_importer() -> None:
@@ -97,14 +99,14 @@ def test_lp_07_an_eori_context_restricts_a_rule() -> None:
 def test_lp_08_unknown_representation_type_is_undetermined_unless_a_rule_covers_it() -> None:
     d = rules.determine(facts(declarant=FORWARDER, kind="unknown"), RULES)
     assert (d.outcome, d.details["code"]) == ("undetermined", rules.NO_MATCHING_RULE)
-    covered = [*RULES, row("t.unknown", "unknown", "any", "importer")]
+    covered = [*RULES, row("t.unknown", "unknown", "any", "importer", "GB")]
     assert rules.determine(facts(declarant=FORWARDER, kind="unknown"), covered).outcome == (
         "determined"
     )
 
 
 def test_lp_09_two_matching_rows_are_ambiguous_and_nothing_is_picked() -> None:
-    both = [*RULES, row("t.overlap", "self", "any", "declarant")]
+    both = [*RULES, row("t.overlap", "self", "any", "declarant", "GB")]
     d = rules.determine(facts(declarant=FORWARDER), both)
     assert (d.outcome, d.details["code"]) == ("undetermined", rules.AMBIGUOUS_RULES)
     assert d.details["rule_keys"] == ["t.forwarder", "t.overlap"]
@@ -128,6 +130,47 @@ def test_lp_12_every_undetermined_reason_is_fixed_text() -> None:
         rules.AMBIGUOUS_RULES,
         rules.IMPORTER_UNKNOWN,
         rules.LIABLE_PARTY_MISSING,
+        rules.IMPORTER_INFERRED,
     ):
         assert rules._REASONS[code]
         assert IMPORTER not in rules._REASONS[code]
+
+
+def test_lp_13_r1_036_an_importer_taken_from_the_batch_is_never_treated_as_declared() -> None:
+    for source in ("batch_fallback", None):
+        d = rules.determine(facts(declarant=IMPORTER, source=source), RULES)
+        assert (d.outcome, d.details["code"]) == ("undetermined", rules.IMPORTER_INFERRED)
+        assert "liable_party" not in d.details
+    # with no importer at all the older, more basic reason still wins
+    d = rules.determine(facts(importer=None, declarant=FORWARDER, source=None), RULES)
+    assert d.details["code"] == rules.IMPORTER_UNKNOWN
+
+
+def test_lp_14_r1_036_a_row_with_no_eori_context_matches_nothing() -> None:
+    blank = [
+        row("t.blank", "self", "any", "importer", None),
+        row("t.empty", "self", "any", "importer", ""),
+    ]
+    for context in ("GB", "XI", None):
+        d = rules.determine(facts(declarant=IMPORTER, context=context), blank)
+        assert (d.outcome, d.details["code"]) == ("undetermined", rules.NO_MATCHING_RULE)
+    # an XI declaration is not settled by a GB row either
+    d = rules.determine(facts(declarant=IMPORTER, context="XI"), RULES)
+    assert d.outcome == "undetermined"
+
+
+def test_lp_15_r1_036_facts_the_engine_does_not_model_never_default_to_determined() -> None:
+    """No-duty, overseas importer and express/postal cases (LEGAL-DEC-019) are not inputs: the
+    engine cannot see them, so a declaration only comes out `determined` when an active rule row
+    names it, and with unknown representation and no declarant it stays undetermined."""
+    assert {f.name for f in fields(rules.DeclarationParties)} == {
+        "importer_eori",
+        "declarant_eori",
+        "representative_eori",
+        "representation_type",
+        "eori_context",
+        "importer_eori_source",
+    }
+    d = rules.determine(facts(declarant=None, kind="unknown"), RULES)
+    assert (d.outcome, d.details["code"]) == ("undetermined", rules.NO_MATCHING_RULE)
+    assert rules.determine(facts(declarant=None, kind="unknown"), []).outcome == "undetermined"

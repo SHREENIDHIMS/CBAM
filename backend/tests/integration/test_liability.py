@@ -1,7 +1,7 @@
 # ruff: noqa: F811, S608 - imported pytest fixtures are test arguments; SQL text is test-only
 """R1-036 liable-person determination: rules are reference data, nothing is guessed.
 
-Scenario IDs LP-20 to LP-31. Product rules, not law: the rule rows are the fixture dataset
+Scenario IDs LP-20 to LP-35. Product rules, not law: the rule rows are the fixture dataset
 `liable_person_rules/fixture.1` whose outcomes are invented (LEGAL-DEC-019 is open).
 """
 
@@ -79,6 +79,7 @@ def declaration(  # type: ignore[no-untyped-def]
     kind: str = "self",
     version: int = 1,
     supersedes: UUID | None = None,
+    source: str | None = "declared",
 ) -> UUID:
     did = uuid4()
     with tenant_session(engine, tenant_id=tenant) as s:
@@ -86,9 +87,9 @@ def declaration(  # type: ignore[no-untyped-def]
             text(
                 "insert into cbam.declarations (id, tenant_id, mrn, version, supersedes_id,"
                 " acceptance_date, importer_party_id, declarant_party_id,"
-                " representative_party_id, representation_type, eori_context, entry_method,"
-                " batch_id, content_sha256) values (:i, :t, :m, :v, :sup, '2027-01-05', :imp,"
-                " :dec, :rep, :k, 'GB', 'cds', :b, :h)"
+                " representative_party_id, representation_type, eori_context, importer_eori_source,"
+                " entry_method, batch_id, content_sha256) values (:i, :t, :m, :v, :sup,"
+                " '2027-01-05', :imp, :dec, :rep, :k, 'GB', :src, 'cds', :b, :h)"
             ),
             {
                 "i": did,
@@ -100,6 +101,7 @@ def declaration(  # type: ignore[no-untyped-def]
                 "dec": party(s, tenant, declarant),
                 "rep": party(s, tenant, representative),
                 "k": kind,
+                "src": source,
                 "b": batch,
                 "h": hashlib.sha256(f"{mrn}{version}{declarant}{kind}".encode()).hexdigest(),
             },
@@ -150,11 +152,12 @@ def test_lp_21_a_loaded_but_not_activated_version_is_not_used(
 def test_lp_22_freight_forwarder_as_declarant_keeps_the_importer_liable(
     app_engine: Engine, store: InMemoryStore, layout: UUID
 ) -> None:
-    """Phase 3 exit gate 5."""
+    """Fixture rows only (invented outcomes): the Phase 3 forwarder exit gate stays open until
+    LEGAL-DEC-019 is answered."""
     fixture_rules_active(app_engine, layout)
     tenant = make_tenant(app_engine, "A")
     batch = seed_batch(app_engine, store, tenant)
-    decl = declaration(app_engine, tenant, batch, "MRN-LP-22", declarant=FORWARDER)
+    decl = declaration(app_engine, tenant, batch, "MRN-LP-22", declarant=FORWARDER, kind="direct")
     out = determine(app_engine, tenant, decl)
     assert (out.outcome, out.liable_party, out.rule_key) == (
         "determined",
@@ -190,7 +193,7 @@ def test_lp_23_direct_importer_and_acting_on_behalf_fixtures(
         kind="indirect",
     )
     assert determine(app_engine, tenant, direct).rule_key == "fixture.direct_importer"
-    assert determine(app_engine, tenant, behalf).liable_party == "importer"
+    assert determine(app_engine, tenant, behalf).rule_key == "fixture.forwarder_declarant"
     out = determine(app_engine, tenant, indirect)
     assert out.liable_party == "representative"
     with tenant_session(app_engine, tenant_id=tenant) as s:
@@ -218,7 +221,7 @@ def test_lp_25_loading_rules_later_supersedes_the_undetermined_decision(
 ) -> None:
     tenant = make_tenant(app_engine, "A")
     batch = seed_batch(app_engine, store, tenant)
-    decl = declaration(app_engine, tenant, batch, "MRN-LP-25", declarant=FORWARDER)
+    decl = declaration(app_engine, tenant, batch, "MRN-LP-25", declarant=FORWARDER, kind="direct")
     first = determine(app_engine, tenant, decl)
     assert first.outcome == "undetermined"
     fixture_rules_active(app_engine, layout)
@@ -272,7 +275,7 @@ def test_lp_28_the_decision_is_audited_without_eoris_and_the_chain_verifies(
     determine(
         app_engine,
         tenant,
-        declaration(app_engine, tenant, batch, "MRN-LP-28", declarant=FORWARDER),
+        declaration(app_engine, tenant, batch, "MRN-LP-28", declarant=FORWARDER, kind="direct"),
     )
     with tenant_session(app_engine, tenant_id=tenant) as s:
         events = (
@@ -295,7 +298,12 @@ def test_lp_29_api_determine_and_read_with_permissions(
     fixture_rules_active(app_engine, layout)
     tenant = make_tenant(app_engine, "A")
     decl = declaration(
-        app_engine, tenant, seed_batch(app_engine, store, tenant), "MRN-LP-29", declarant=FORWARDER
+        app_engine,
+        tenant,
+        seed_batch(app_engine, store, tenant),
+        "MRN-LP-29",
+        declarant=FORWARDER,
+        kind="direct",
     )
     ops = user_for(app_engine, tenant, "operations")
     agent = user_for(app_engine, tenant, "tax_agent")
@@ -310,3 +318,90 @@ def test_lp_29_api_determine_and_read_with_permissions(
     other = make_tenant(app_engine, "B")
     stranger = user_for(app_engine, other, "operations")
     assert client.get(path.replace(str(tenant), str(other)), headers=stranger).status_code == 404
+
+
+def test_lp_32_r1_036_an_importer_taken_from_the_batch_is_undetermined_end_to_end(
+    app_engine: Engine, store: InMemoryStore, layout: UUID
+) -> None:
+    """A file row with no importer EORI falls back to the batch EORI for the ledger, but the
+    liable-person engine must not treat that as the importer named on the declaration."""
+    fixture_rules_active(app_engine, layout)
+    tenant = make_tenant(app_engine, "A")
+    row = good_row(1)
+    row[2] = ""
+    row[1] = "05/01/2027"
+    batch = receive(app_engine, store, tenant, to_csv([row, good_row(2)]))
+    assert run(app_engine, store, tenant, batch.id) == "completed"
+    with tenant_session(app_engine, tenant_id=tenant) as s:
+        found = {
+            r.mrn: (r.importer_eori_source, r.eori)
+            for r in s.execute(
+                text(
+                    "select d.mrn, d.importer_eori_source, p.eori from cbam.declarations d"
+                    " join cbam.parties p on p.tenant_id = d.tenant_id"
+                    " and p.id = d.importer_party_id"
+                )
+            ).all()
+        }
+        ids = {r.mrn: r.id for r in s.execute(text("select id, mrn from cbam.declarations")).all()}
+    assert found["MRN-SENTINEL-0001"] == ("batch_fallback", IMPORTER)
+    assert found["MRN-SENTINEL-0002"] == ("declared", IMPORTER)
+    out = determine(app_engine, tenant, ids["MRN-SENTINEL-0001"])
+    assert (out.outcome, out.code, out.liable_party) == ("undetermined", "IMPORTER_INFERRED", None)
+    assert out.review_task_id is not None
+
+
+def test_lp_33_r1_036_an_unknown_importer_source_fails_closed(
+    app_engine: Engine, store: InMemoryStore, layout: UUID
+) -> None:
+    fixture_rules_active(app_engine, layout)
+    tenant = make_tenant(app_engine, "A")
+    batch = seed_batch(app_engine, store, tenant)
+    for source in (None, "batch_fallback"):
+        decl = declaration(
+            app_engine, tenant, batch, f"MRN-LP-33-{source}", declarant=IMPORTER, source=source
+        )
+        assert determine(app_engine, tenant, decl).code == "IMPORTER_INFERRED"
+
+
+def test_lp_34_r1_036_a_blank_context_rule_row_does_not_settle_a_declaration(
+    app_engine: Engine, admin_engine: Engine, store: InMemoryStore, layout: UUID
+) -> None:
+    """A loaded row with no eori_context (null) matches nothing, GB or XI."""
+    fixture_rules_active(app_engine, layout)
+    with admin_engine.begin() as conn:
+        conn.execute(text("set local role cbam_owner"))
+        conn.execute(text("alter table cbam.ref_liable_person_rules disable trigger user"))
+        conn.execute(text("alter table cbam.ref_liable_person_rules no force row level security"))
+        conn.execute(text("update cbam.ref_liable_person_rules set eori_context = null"))
+        conn.execute(text("alter table cbam.ref_liable_person_rules force row level security"))
+        conn.execute(text("alter table cbam.ref_liable_person_rules enable trigger user"))
+    tenant = make_tenant(app_engine, "A")
+    batch = seed_batch(app_engine, store, tenant)
+    decl = declaration(app_engine, tenant, batch, "MRN-LP-34", declarant=IMPORTER)
+    out = determine(app_engine, tenant, decl)
+    assert (out.outcome, out.code) == ("undetermined", "NO_MATCHING_RULE")
+
+
+@pytest.mark.parametrize("status", ["draft", "laid"])
+def test_lp_35_r1_036_an_active_version_whose_source_is_not_in_force_is_ignored(
+    app_engine: Engine, admin_engine: Engine, store: InMemoryStore, layout: UUID, status: str
+) -> None:
+    """CLAUDE.md rule 2: draft law never drives a decision, even from an ACTIVE dataset."""
+    fixture_rules_active(app_engine, layout)
+    tenant = make_tenant(app_engine, "A")
+    batch = seed_batch(app_engine, store, tenant)  # needs the layout source in force: do it first
+    with admin_engine.begin() as conn:
+        conn.execute(text("set local role cbam_owner"))
+        conn.execute(text("alter table cbam.regulatory_sources disable trigger user"))
+        conn.execute(text("alter table cbam.regulatory_sources no force row level security"))
+        conn.execute(
+            text("update cbam.regulatory_sources set status = :s where source_id = :i"),
+            {"s": status, "i": "FIXTURE-TEST-SOURCE"},
+        )
+        conn.execute(text("alter table cbam.regulatory_sources force row level security"))
+        conn.execute(text("alter table cbam.regulatory_sources enable trigger user"))
+    decl = declaration(app_engine, tenant, batch, "MRN-LP-35", declarant=IMPORTER)
+    out = determine(app_engine, tenant, decl)
+    assert (out.outcome, out.code, out.liable_party) == ("undetermined", "NO_ACTIVE_RULE", None)
+    assert out.review_task_id is not None
