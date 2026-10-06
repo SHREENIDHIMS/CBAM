@@ -177,9 +177,17 @@ clock, money, decisions, tasks.
 5. - [x] Importer / declarant / agent / acting-on-behalf relationships (R1-006).
    *Captured as FIELDS only (party EORIs and `representation_type` as reported, never inferred);
    no liable-person logic here: that is step 6 (PR4). Real-report mapping: DATA-DEC-025.*
-6. - [ ] Liable-person determination rule + decision record; fixtures for direct importer,
+6. - [x] Liable-person determination rule + decision record; fixtures for direct importer,
    broker/declarant, acting-on-behalf (R1-036).
-7. - [ ] Manual import entry with reason; same validation and downstream fields (R1-004).
+   *The rules are DATA (`ref_liable_person_rules`, migration 0012), so no legal rule is coded and
+   none is loaded: LEGAL-DEC-019 is open. With no active rule, or facts no rule covers, the answer
+   is `undetermined` and one review task asks a person. The fixtures are invented outcomes that
+   prove the engine; the engine runs on request (`POST .../declarations/{id}/liable-person`), it is
+   not yet called automatically after an import. Rule-date basis: LEGAL-DEC-026.*
+7. - [x] Manual import entry with reason; same validation and downstream fields (R1-004).
+   *Also built here: the value-correction endpoint (R1-010, `imports:correct`). Both write new
+   rows with lineage (a one-row `manual_entry` batch and an immutable source row); neither can
+   replace a line a person already settled.*
 8. - [ ] Celery job for large files with progress; replay safety test (same file twice →
    no duplicates).
 8a. - [ ] "Get customs data" adapter (R1-054): parse import item, header and tax-lines
@@ -196,7 +204,7 @@ clock, money, decisions, tasks.
 - [ ] A year of fixture "Get customs data" reports loads without duplicates and a missing window shows as a gap with a task
 - [x] Replaying a file creates no duplicate business records
 - [x] Every line links to its exact source row and file
-- [ ] Freight-forwarder-as-declarant fixture keeps importer liable
+- [x] Freight-forwarder-as-declarant fixture keeps importer liable — *proven on the invented fixture rules (LP-04, LP-22); real rules need LEGAL-DEC-019*
 
 ---
 

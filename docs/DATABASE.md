@@ -95,6 +95,7 @@ revoke update, delete, truncate on audit_events from cbam_app;
   - `ref_eu_template_mappings` (template_version, sheet, cell_or_column, maps_to_field) (R1-055)
   - `ref_linked_ets_jurisdictions` (jurisdiction, exemption basis) — empty until an agreement commences
   - `ref_compliance_calendar` (period, return_due, payment_due) — seeded `pending` from the policy summary (REG-DEC-007)
+  - `ref_liable_person_rules` (rule_key, representation_type, declarant_relation, eori_context, liable_party, description) — migration 0012 (R1-036). Nothing is loaded for real while LEGAL-DEC-019 is open; only the test fixture exists. `declarant_relation` is `same_as_importer`, `different_from_importer`, `absent` or `any`; `liable_party` is `importer`, `declarant` or `representative`. Outcomes are stored as `decisions` (`subject_type = declaration`, `rule_id = R1-036.liable_person`)
   - R2/R3: `ref_gas_factors`, `ref_functional_units`, `ref_production_routes`, `ref_system_boundaries`, `ref_default_emissions`, `ref_default_methodology`, `ref_validation_rules`, `ref_verification_rules`, `ref_evidence_types`, `ref_carbon_price_schemes`, `ref_exchange_rates`, `ref_cbam_rates`, `ref_compliance_calendar`, `ref_penalty_rules`, `ref_interest_rules`, `ref_retention_rules`, `ref_payment_methods`, `ref_precursor_allocation_rules`, `ref_transition_packages`, `ref_enforcement_case_types`
 
 Exclusion constraint (as built: only one version of a dataset is active, so non-overlap within a version is enough; `btree_gist` is required):
