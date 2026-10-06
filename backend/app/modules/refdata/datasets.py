@@ -139,6 +139,18 @@ _SPECS: tuple[DatasetSpec, ...] = (
         key=("currency",),
     ),
     DatasetSpec(
+        "liable_person_rules",
+        (
+            _c("rule_key"),
+            _c("representation_type"),
+            _c("declarant_relation"),
+            _c("eori_context", optional=True),
+            _c("liable_party"),
+            _c("description"),
+        ),
+        key=("rule_key",),
+    ),
+    DatasetSpec(
         "compliance_calendar",
         (_c("period"), _c("return_due", "date"), _c("payment_due", "date")),
         key=("period",),

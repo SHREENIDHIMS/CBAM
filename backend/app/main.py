@@ -16,6 +16,7 @@ from app.modules.identity.api import router as identity_router
 from app.modules.imports.api import router as imports_router
 from app.modules.imports.impact import register as register_import_impact
 from app.modules.imports.ledger_api import router as ledger_router
+from app.modules.liability.api import router as liability_router
 from app.modules.platform_admin.api import router as platform_router
 from app.modules.refdata.api import router as refdata_router
 from app.modules.tasks.api import router as tasks_router
@@ -44,6 +45,7 @@ def create_app() -> FastAPI:
     app.include_router(tasks_router, prefix="/api/v1")
     app.include_router(imports_router, prefix="/api/v1")
     app.include_router(ledger_router, prefix="/api/v1")
+    app.include_router(liability_router, prefix="/api/v1")
     register_import_impact()
     app.include_router(platform_router, prefix="/api/v1")
     app.include_router(refdata_router, prefix="/api/v1")
