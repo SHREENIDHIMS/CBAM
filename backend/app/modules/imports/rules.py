@@ -1287,3 +1287,45 @@ def check_manual_reason(reason: str | None) -> Decision:
         outcome="ALLOWED",
         reason="reason present",
     )
+
+
+# --- header and tax-lines reports (R1-054) ---------------------------------------------------
+# These reports are joined to the lines of the item report by declaration reference (MRN); a
+# tax-lines row may also name the item it belongs to. The join is lineage only (a source link with
+# role `header` or `tax_line`): no fact from these rows is copied onto a line here.
+
+JOIN_REPORT_TYPES: tuple[str, ...] = ("import_header", "import_tax_lines")
+_JOIN_ROLE = {"import_header": "header", "import_tax_lines": "tax_line"}
+_MRN_MAX = 100
+
+
+def join_role(report_type: str) -> str:
+    """The `import_line_sources.role` a report of this type links with."""
+    return _JOIN_ROLE[report_type]
+
+
+def missing_join_fields(report_type: str, match: LayoutMatch) -> tuple[str, ...]:
+    """Canonical fields a header or tax-lines report must map (to a heading present in the file)
+    for its rows to be joinable. Without the MRN no row could ever be joined, so the file is
+    refused up front like an item report with no line fields."""
+    if report_type not in JOIN_REPORT_TYPES:
+        return ()
+    present = {col.maps_to for col in match.by_header.values()}
+    return tuple(f for f in ("declaration.mrn",) if f not in present)
+
+
+def join_key(row: MappedRow, report_type: str) -> tuple[str, int | None] | None:
+    """(MRN, item number or None) a header or tax-lines row joins on, or None when the row has no
+    usable key (the row's own validation issues say why). Only a tax-lines row carries an item
+    number; a malformed one gives no key at all rather than a join to every line."""
+    mrn = row.values.get("declaration.mrn", "").strip()
+    if not mrn or len(mrn) > _MRN_MAX:
+        return None
+    if report_type != "import_tax_lines":
+        return mrn, None
+    item = row.values.get("line.item_no", "").strip()
+    if not item:
+        return mrn, None
+    if _check_item_no(item) is not None:
+        return None
+    return mrn, int(item)

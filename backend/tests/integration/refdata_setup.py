@@ -25,6 +25,7 @@ IMPORT_TABLES = [
     "declarations",
     "parties",
     "row_exceptions",
+    "report_row_keys",
     "source_rows",
     "import_batches",
 ]
