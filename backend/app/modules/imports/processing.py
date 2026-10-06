@@ -41,7 +41,7 @@ from app.core.errors import StorageError, TenantMismatchError
 from app.core.ids import uuid7
 from app.core.storage import ObjectStore
 from app.core.versioning import update_versioned
-from app.modules.imports import normalisation, rules
+from app.modules.imports import joins, normalisation, rules
 from app.modules.imports.models import (
     document_versions,
     import_batches,
@@ -448,12 +448,25 @@ def _run(
         # Rows saved before the problem stay (raw rows are never deleted) with their counters;
         # the batch is rejected and a corrected file makes a new batch.
         return reject(engine, clock, tenant_id, batch_id, [rules.Issue(stopped, "")], None)
-    if start.report_type == "import_item":  # other reports are joined by the adapter (step 8a)
+    if start.report_type == "import_item":
         _normalise(
             engine,
             clock,
             tenant_id,
             batch_id,
+            match,
+            chunk_rows,
+            after_normalise_chunk,
+            limits,
+            lease,
+        )
+    elif start.report_type in rules.JOIN_REPORT_TYPES:  # header and tax lines (R1-054)
+        _join_reports(
+            engine,
+            clock,
+            tenant_id,
+            batch_id,
+            str(start.report_type),
             match,
             chunk_rows,
             after_normalise_chunk,
@@ -631,7 +644,10 @@ def _prepare(
     if match.missing_required:
         issues = [rules.Issue("COLUMN_MISSING", name) for name in match.missing_required]
         return reject(engine, clock, tenant_id, batch_id, issues, "columns_missing")
-    unmapped = rules.missing_line_fields(match) if start.report_type == "import_item" else ()
+    if start.report_type == "import_item":
+        unmapped = rules.missing_line_fields(match)
+    else:
+        unmapped = rules.missing_join_fields(start.report_type or "", match)
     if unmapped:
         issues = [rules.Issue("COLUMN_MISSING", name) for name in unmapped]
         return reject(engine, clock, tenant_id, batch_id, issues, "columns_missing")
@@ -895,6 +911,66 @@ def _reject_file_conflicts(
     lease.last_renewed = now
 
 
+def _join_reports(
+    engine: Engine,
+    clock: Clock,
+    tenant_id: UUID,
+    batch_id: UUID,
+    report_type: str,
+    match: rules.LayoutMatch,
+    chunk_rows: int,
+    after_chunk: Callable[[int], None] | None,
+    limits: rules.ImportLimits,
+    lease: _Lease,
+) -> None:
+    """The `normalising` pass of a header or tax-lines report (R1-054): store the join key of
+    every row without an error exception and link it to the current lines of its declaration.
+    Rows that join nothing yet are not errors: the item report may come later, and it makes the
+    link when it lands. Resumable and idempotent (unique key, unique link)."""
+    with tenant_session(engine, tenant_id=tenant_id) as s:
+        _lock(s, tenant_id, batch_id)
+        _advance(s, clock, tenant_id, batch_id, "normalising")
+    size = max(1, min(chunk_rows, normalisation.NORMALISE_CHUNK_ROWS))
+    after = 0
+    while True:
+        now = clock.now()
+        with tenant_session(engine, tenant_id=tenant_id) as s:
+            _lock(s, tenant_id, batch_id)
+            current = _batch(s, tenant_id, batch_id)
+            if current.status in rules.TERMINAL_STATES:
+                return
+            if current.lease_owner != lease.token:
+                raise LeaseLostError()
+            rows = normalisation.pending_rows(s, tenant_id, batch_id, size, after=after)
+            if not rows:
+                return
+            joins.lock_mrns(s, tenant_id, joins.keys_for_rows(rows, match, report_type))
+            mrns = joins.register_keys(
+                s,
+                tenant_id=tenant_id,
+                batch_id=batch_id,
+                report_type=report_type,
+                rows=rows,
+                match=match,
+                now=now,
+            )
+            joins.join_mrns(s, tenant_id=tenant_id, mrns=mrns, now=now)
+            update_versioned(
+                s,
+                "import_batches",
+                row_id=batch_id,
+                expected_version=current.row_version,
+                values={
+                    **_recount(s, tenant_id, batch_id),
+                    "lease_expires_at": now + timedelta(seconds=limits.lease_seconds),
+                },
+            )
+            lease.last_renewed = now
+            after = rows[-1].number
+        if after_chunk is not None:
+            after_chunk(len(rows))
+
+
 def _normalise(
     engine: Engine,
     clock: Clock,
@@ -933,7 +1009,7 @@ def _normalise(
             rows = normalisation.pending_rows(s, tenant_id, batch_id, size)
             if not rows:
                 return
-            normalisation.normalise_chunk(
+            outcome = normalisation.normalise_chunk(
                 s,
                 tenant_id=tenant_id,
                 batch_id=batch_id,
@@ -944,6 +1020,13 @@ def _normalise(
                 recency=recency,
                 now=now,
                 add_exceptions=partial(_add_exceptions, tenant_id, batch_id, now),
+            )
+            # Header and tax-lines rows that arrived BEFORE these lines are linked now (R1-054).
+            joins.join_mrns(
+                s,
+                tenant_id=tenant_id,
+                mrns=joins.mrns_of_lines(s, tenant_id, outcome.line_ids),
+                now=now,
             )
             update_versioned(
                 s,

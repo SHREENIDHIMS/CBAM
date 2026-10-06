@@ -8,5 +8,5 @@ source_status: laid
 fixture: true
 effective_from: 2027-01-01
 effective_to: null
-checksum_sha256: 1fae19cec3d653a4ab837095087fed9e39c15ebd41ba463d2e53ce09a4d90c29
+checksum_sha256: eafa7a17c9f2f2b4d2213aebca78a6a528b03527e8bc0b752e6cc35292648fcb
 notes: "FIXTURE ONLY, PROVISIONAL (DATA-DEC-002). Every column name here (SYNTH_*) is INVENTED for tests; none is an HMRC heading. The real layout needs a masked HMRC Get customs data report before the pilot, and this file must never be copied to backend/refdata/."
