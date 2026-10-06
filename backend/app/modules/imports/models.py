@@ -1,4 +1,4 @@
-"""SQLAlchemy Core definitions mirroring migrations 0009 to 0011 and 0013 (the migrations are the
+"""SQLAlchemy Core definitions mirroring migrations 0009 to 0011 and 0014 (the migrations are the
 source of truth)."""
 
 from sqlalchemy import (
@@ -195,7 +195,7 @@ import_line_sources = Table(
     Column("created_at", DateTime(timezone=True)),
 )
 
-report_row_keys = Table(  # migration 0013: the join key of a header or tax-lines row
+report_row_keys = Table(  # migration 0014: the join key of a header or tax-lines row
     "report_row_keys",
     metadata,
     Column("id", Uuid, primary_key=True),

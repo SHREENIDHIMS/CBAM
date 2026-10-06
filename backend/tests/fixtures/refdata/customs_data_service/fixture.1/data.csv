@@ -1,0 +1,2 @@
+rule_key,value_int,description
+unavailable_latest_days,2,Fixture only: the latest days HMRC has not yet made available

@@ -17,6 +17,10 @@ celery_app.conf.beat_schedule = {
         "task": "app.core.jobs.escalate_overdue_tasks",
         "schedule": crontab(hour=6, minute=0),
     },
+    "customs-data-coverage-scan": {
+        "task": "app.core.jobs.scan_customs_data_coverage",
+        "schedule": crontab(hour=6, minute=30),
+    },
     "audit-verify-chains": {
         "task": "app.core.jobs.verify_audit_chains",
         "schedule": crontab(hour=2, minute=30),
@@ -44,6 +48,42 @@ def verify_audit_chains() -> str:
         structlog.get_logger().error("audit_chain_broken", chains=broken)
         raise AuditChainBrokenError(f"audit chain broken for: {sorted(broken)}")
     return "ok"
+
+
+@celery_app.task(name="app.core.jobs.scan_customs_data_coverage")  # type: ignore[untyped-decorator]
+def scan_customs_data_coverage() -> int:
+    """Daily: gap tasks and the monthly "request last month's customs data" task for every
+    client's registered EORIs (R1-054). Idempotent; only ever creates tasks."""
+    from uuid import UUID
+
+    from sqlalchemy import text
+    from sqlalchemy.orm import Session
+
+    from app.core.clock import SystemClock
+    from app.core.db import get_engine, run_as_tenant, tenant_session
+    from app.modules.coverage.service import scan
+    from app.modules.tasks.service import Actor
+
+    engine, clock = get_engine(), SystemClock()
+    with tenant_session(engine, tenant_id=None, platform=True) as s:
+        tenant_ids = list(
+            s.execute(text("select id from cbam.tenants where status = 'active'")).scalars()
+        )
+    created = 0
+    for tenant_id in tenant_ids:
+
+        def run_scan(session: Session, tenant_id: UUID = tenant_id) -> int:
+            result = scan(
+                session,
+                tenant_id=tenant_id,
+                actor=Actor("job", None),
+                now=clock.now(),
+                today=clock.today_uk(),
+            )
+            return result.gap_tasks_created + result.month_tasks_created
+
+        created += run_as_tenant(engine, tenant_id, run_scan)
+    return created
 
 
 @celery_app.task(name="app.core.jobs.escalate_overdue_tasks")  # type: ignore[untyped-decorator]
