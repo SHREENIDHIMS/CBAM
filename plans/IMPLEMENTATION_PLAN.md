@@ -190,18 +190,30 @@ clock, money, decisions, tasks.
    replace a line a person already settled.*
 8. - [ ] Celery job for large files with progress; replay safety test (same file twice →
    no duplicates).
-8a. - [ ] "Get customs data" adapter (R1-054): parse import item, header and tax-lines
+8a. - [x] "Get customs data" adapter (R1-054): parse import item, header and tax-lines
    reports; join by declaration; record EORI (GB/XI) and the report's date window.
-8b. - [ ] Coverage tracker (R1-054): per-client, per-EORI calendar of loaded days; gap and
+   *All three report types are parsed by the same job against the layout reference data. Header
+   and tax-lines rows are joined to the current lines of their declaration as lineage only (source
+   links with role `header` or `tax_line`, keys in `report_row_keys`, migration 0013), in whichever
+   order the files arrive. Nothing from them is copied onto a line (procedure codes wait for
+   Phase 4). The EORI and window are the batch's declared metadata. Real column mapping still
+   needs a masked HMRC report (DATA-DEC-002, DATA-DEC-027).*
+8b. - [x] Coverage tracker (R1-054): per-client, per-EORI calendar of loaded days; gap and
    overlap detection; monthly ops task on the 1st to fetch last month; record whether the
    client granted us third-party access; account for the 2-day / 72-hour HMRC lag.
+   *Migration 0014: `customs_data_eoris` (with third-party access status), append-only
+   `customs_data_coverage` written when a report batch completes, and the reference dataset
+   `customs_data_service` for the lag. The 2-day lag is data and cannot activate until GOV-DEC-021
+   is decided, so until then no day is hidden (more gap warnings, never fewer). The 72-hour report
+   delay is not modelled yet. The monthly task is created by the first daily scan on or after the
+   1st, once per EORI per month.*
 9. - [ ] UI: import batch list/detail, exception report (view + CSV), import ledger with
    filters, line detail showing source row. The CSV export must escape leading `= + - @` in
    every cell that came from an uploaded file (docs/SECURITY.md files checklist).
 
 **Exit gate**
 - [ ] **500-row CDS file imports cleanly with errors reported per row** (handbook gate) — *proven on the provisional synthetic layout by IMP-10/IMP-45 (463 lines and 37 exceptions); tick when re-run on a real masked HMRC report (DATA-DEC-002)*
-- [ ] A year of fixture "Get customs data" reports loads without duplicates and a missing window shows as a gap with a task
+- [x] A year of fixture "Get customs data" reports loads without duplicates and a missing window shows as a gap with a task — *COV-23 (synthetic layout, 11 overlapping monthly reports, June missing)*
 - [x] Replaying a file creates no duplicate business records
 - [x] Every line links to its exact source row and file
 - [x] Freight-forwarder-as-declarant fixture keeps importer liable — *proven on the invented fixture rules (LP-04, LP-22); real rules need LEGAL-DEC-019*

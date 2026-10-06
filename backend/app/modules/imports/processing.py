@@ -41,6 +41,7 @@ from app.core.errors import StorageError, TenantMismatchError
 from app.core.ids import uuid7
 from app.core.storage import ObjectStore
 from app.core.versioning import update_versioned
+from app.modules.coverage import service as coverage
 from app.modules.imports import joins, normalisation, rules
 from app.modules.imports.models import (
     document_versions,
@@ -479,6 +480,9 @@ def _run(
         counters = _recount(s, tenant_id, batch_id)
         target = "completed_with_errors" if counters["rows_rejected"] else "completed"
         _advance(s, clock, tenant_id, batch_id, target, progress=counters)
+        # The days this report covers become part of the client's coverage calendar (R1-054),
+        # in the same transaction that completes the batch.
+        coverage.record_for_batch(s, tenant_id=tenant_id, batch_id=batch_id, now=clock.now())
         status = str(_batch(s, tenant_id, batch_id).status)
     log.info("import_batch_processed", batch_id=str(batch_id), status=status, **counters)
     return status
