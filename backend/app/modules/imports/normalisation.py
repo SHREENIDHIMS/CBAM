@@ -260,7 +260,13 @@ def _line_chains(
     return chains
 
 
-def _decide(chain: _Chain | None, incoming_hash: str, batch_id: UUID, recency: date) -> str:
+def _decide(
+    chain: _Chain | None,
+    incoming_hash: str,
+    batch_id: UUID,
+    recency: date,
+    entry_method: str,
+) -> str:
     cur = chain.current if chain else None
     return rules.reconcile_version(
         current_hash=cur.content_sha256 if cur else None,
@@ -274,6 +280,7 @@ def _decide(chain: _Chain | None, incoming_hash: str, batch_id: UUID, recency: d
         incoming_hash=incoming_hash,
         incoming_batch_id=batch_id,
         incoming_recency=recency,
+        incoming_entry_method=entry_method,
     )
 
 
@@ -329,13 +336,13 @@ def normalise_chunk(
         for src, line in groups[mrn]:
             decl = line.declaration
             chain = decl_chains.get(mrn)
-            action = _decide(chain, decl.content_sha256, batch_id, recency)
+            action = _decide(chain, decl.content_sha256, batch_id, recency, ctx.entry_method)
             if action in _DECLARATION_BLOCKED:
                 rejected.append((src.number, src.id, _blocked_issue(action, "declaration.mrn")))
                 continue
             key = (mrn, line.item_no)
             lchain = line_chains.get(key)
-            line_action = _decide(lchain, line.content_sha256, batch_id, recency)
+            line_action = _decide(lchain, line.content_sha256, batch_id, recency, ctx.entry_method)
             if line_action in _LINE_BLOCKED:
                 rejected.append((src.number, src.id, _blocked_issue(line_action, "line.item_no")))
                 continue
@@ -356,6 +363,7 @@ def normalise_chunk(
                         "representative_party_id": party_ids.get(decl.representative_eori or ""),
                         "representation_type": decl.representation_type,
                         "eori_context": decl.eori_context,
+                        "importer_eori_source": decl.importer_eori_source,
                         "entry_method": ctx.entry_method,
                         "batch_id": batch_id,
                         "content_sha256": decl.content_sha256,
@@ -415,12 +423,13 @@ def normalise_chunk(
                     "customs_value_gbp_note": line.customs_value_gbp_note,
                     "valuation_basis": line.valuation_basis,
                     "value_source": line.value_source,
+                    "value_override_reason": ctx.override_reason,
                     "country_of_origin_declared": line.country_of_origin_declared,
                     "cpc": line.cpc,
                     "batch_id": batch_id,
                     "source_row_id": src.id,
                     "entry_method": ctx.entry_method,
-                    "change_reason": None if previous_line is None else rules.REASON_SOURCE_CHANGED,
+                    "change_reason": None if previous_line is None else ctx.change_reason,
                     "content_sha256": line.content_sha256,
                     "hash_version": rules.HASH_VERSION,
                     "created_at": now,
@@ -458,13 +467,17 @@ def normalise_chunk(
     return out
 
 
-_DECLARATION_BLOCKED = frozenset({"conflict", "blocked_by_correction", "older_extract"})
+_DECLARATION_BLOCKED = frozenset(
+    {"conflict", "blocked_by_correction", "older_extract", "manual_over_file"}
+)
 _LINE_BLOCKED = _DECLARATION_BLOCKED
 
 
 def _blocked_issue(action: str, field: str) -> rules.Issue:
     if action == "blocked_by_correction":
         return rules.Issue("SOURCE_CONFLICTS_WITH_CORRECTION", field)
+    if action == "manual_over_file":
+        return rules.Issue("MANUAL_ENTRY_OVER_FILE", field)
     if action == "older_extract":
         return rules.Issue("OLDER_EXTRACT_CONFLICT", field)
     return rules.Issue(

@@ -1,0 +1,4 @@
+rule_key,representation_type,declarant_relation,eori_context,liable_party,description
+fixture.direct_importer,self,same_as_importer,GB,importer,Fixture only: importer lodged the declaration itself
+fixture.forwarder_declarant,direct,different_from_importer,GB,importer,Fixture only: a freight forwarder or broker lodges in the importer's name and the importer stays liable (invented outcome; LEGAL-DEC-019 is open)
+fixture.indirect_representation,indirect,any,GB,representative,Fixture only: declarant acts for the importer in its own name (invented outcome to exercise the code path)

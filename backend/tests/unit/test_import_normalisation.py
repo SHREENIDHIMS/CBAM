@@ -250,6 +250,18 @@ def test_imp_47_r1_005_stale_data_never_supersedes_newer_data_or_a_correction() 
     assert decide(current_entry_method="correction", incoming_hash="a") == "seen_earlier"
 
 
+def test_man_r1_004_a_keyed_entry_never_replaces_file_data_only_a_human_row_can_block() -> None:
+    assert decide(incoming_entry_method="manual") == "manual_over_file"
+    assert decide(incoming_entry_method="manual", incoming_hash="b") == "same"
+    assert decide(incoming_entry_method="manual", incoming_hash="a") == "seen_earlier"
+    assert decide(incoming_entry_method="manual", current_hash=None) == "new"
+    # over an earlier keyed or corrected version the old answer holds
+    assert decide(incoming_entry_method="manual", current_entry_method="manual") == (
+        "blocked_by_correction"
+    )
+    assert decide(incoming_entry_method="gcd") == "changed"
+
+
 def test_imp_47_r1_003_the_hash_carries_a_schema_version() -> None:
     base = {"x": "1"}
     assert rules.content_hash(base) == rules.content_hash(dict(base))

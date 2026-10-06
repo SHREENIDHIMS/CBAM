@@ -1,0 +1,12 @@
+dataset: liable_person_rules
+version: "fixture.1"
+source_id: FIXTURE-TEST-SOURCE
+source_title: Test fixture source (not law)
+source_type: guidance
+retrieved_at: 2026-10-03
+source_status: laid
+fixture: true
+effective_from: 2027-01-01
+effective_to: null
+checksum_sha256: 34d28ce05792a5b4669648c9ccf6652aee0168cc9d721fa2139c7da516ff65fb
+notes: "Fixture only (test data, not law). Outcomes are invented to exercise the rule engine; LEGAL-DEC-019 is open."
