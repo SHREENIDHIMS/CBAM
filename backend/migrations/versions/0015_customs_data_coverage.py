@@ -125,9 +125,33 @@ create policy tenant_isolation on cbam.{t}
     + "\nrevoke update, delete, truncate on cbam.customs_data_coverage from cbam_app;\n"
 )
 
+# The register is editable only through the API (access status and note). The identity columns and
+# the first day to cover are locked in the database too (CLAUDE.md rule 17): moving
+# `tracking_from` forward would hide a gap, so it is refused for every role. The application role
+# can never delete register rows.
+_GUARD = """
+create function cbam.customs_data_eoris_guard() returns trigger
+language plpgsql as $$
+begin
+  if new.id is distinct from old.id
+     or new.tenant_id is distinct from old.tenant_id
+     or new.eori is distinct from old.eori
+     or new.tracking_from is distinct from old.tracking_from
+     or new.created_at is distinct from old.created_at
+     or new.created_by is distinct from old.created_by then
+    raise exception 'customs_data_eoris: eori, tracking_from and creation fields cannot change';
+  end if;
+  return new;
+end $$;
+create trigger customs_data_eoris_guard before update on cbam.customs_data_eoris
+  for each row execute function cbam.customs_data_eoris_guard();
+revoke delete, truncate on cbam.customs_data_eoris from cbam_app;
+"""
+
 _DOWN = """
 drop table if exists cbam.customs_data_coverage;
 drop table if exists cbam.customs_data_eoris;
+drop function if exists cbam.customs_data_eoris_guard();
 drop view if exists cbam.v_active_customs_data_service;
 drop table if exists cbam.ref_customs_data_service;
 """
@@ -138,6 +162,7 @@ def upgrade() -> None:
     op.execute(_DATASET)
     op.execute(_TABLES)
     op.execute(_RLS)
+    op.execute(_GUARD)
 
 
 def downgrade() -> None:

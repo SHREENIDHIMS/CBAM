@@ -112,7 +112,9 @@ def build_calendar(
         for offset in range((first - start).days, (last - start).days + 1):
             batches[offset].append(window)
     hidden_after = (
-        today - timedelta(days=unavailable_latest_days) if unavailable_latest_days else None
+        today - timedelta(days=unavailable_latest_days)
+        if unavailable_latest_days is not None
+        else None
     )
     periods: list[Period] = []
     overlaps: list[Overlap] = []

@@ -2,18 +2,26 @@
 per-EORI calendar, keep the register of EORIs to cover and ask a person to close gaps.
 
 Nothing here decides scope, tax point, quarter or threshold. Tasks are created, never closed:
-a person closes them, and a gap that is still there is raised again by the next scan.
+a person closes them, and a gap that is still there is raised again by the next scan. A gap that
+is later partly filled splits in two: the new second part gets its own task and the first task
+stays open until a person closes it (a deliberate choice, noted in DATA-DEC-028).
 """
 
 from datetime import date, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
+import structlog
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.audit import record
-from app.core.errors import InvalidRequestError, RuleBlockedError, TenantMismatchError
+from app.core.errors import (
+    InvalidRequestError,
+    RuleBlockedError,
+    StaleVersionError,
+    TenantMismatchError,
+)
 from app.core.ids import uuid7
 from app.core.versioning import update_versioned
 from app.modules.coverage import rules
@@ -29,6 +37,8 @@ from app.modules.coverage.schemas import (
 from app.modules.refdata import service as refdata
 from app.modules.tasks import service as tasks
 from app.modules.tasks.service import Actor
+
+log = structlog.get_logger()
 
 DATASET = "customs_data_service"
 LAG_KEY = "unavailable_latest_days"
@@ -64,6 +74,9 @@ def record_for_batch(session: Session, *, tenant_id: UUID, batch_id: UUID, now: 
         or batch.window_end is None
         or batch.window_end < batch.window_start
     ):
+        if batch is not None and batch.window_start and batch.window_end:
+            if batch.window_end < batch.window_start:
+                log.warning("coverage_window_inconsistent", batch_id=str(batch_id))
         return False
     inserted = session.execute(
         text(
@@ -126,18 +139,13 @@ def register_eori(
     today: date,
     body: EoriIn,
 ) -> EoriOut:
-    exists = session.execute(
-        text("select 1 from cbam.customs_data_eoris where tenant_id = :t and eori = :e"),
-        {"t": tenant_id, "e": body.eori},
-    ).scalar_one_or_none()
-    if exists is not None:
-        raise RuleBlockedError("This EORI is already registered", rule_id="R1-054")
     new_id = uuid7()
-    session.execute(
+    inserted = session.execute(
         text(
             "insert into cbam.customs_data_eoris (id, tenant_id, eori, tracking_from,"
             " third_party_access, access_recorded_on, note, created_at, created_by, row_version)"
             " values (:id, :t, :e, :from, :acc, :rec, :note, :now, :by, 1)"
+            " on conflict (tenant_id, eori) do nothing returning id"
         ),
         {
             "id": new_id,
@@ -150,7 +158,9 @@ def register_eori(
             "now": now,
             "by": actor.actor_id,
         },
-    )
+    ).scalar_one_or_none()
+    if inserted is None:  # also the answer to two simultaneous requests: the database decides
+        raise RuleBlockedError("This EORI is already registered", rule_id="R1-054")
     record(
         session,
         tenant_id=tenant_id,
@@ -182,11 +192,20 @@ def update_eori(
 ) -> EoriOut:
     before = _get_eori(session, tenant_id, eori_id)
     values: dict[str, Any] = {}
-    if "third_party_access" in body.model_fields_set:
+    if (
+        "third_party_access" in body.model_fields_set
+        and body.third_party_access != before.third_party_access
+    ):
         values["third_party_access"] = body.third_party_access
         values["access_recorded_on"] = today if body.third_party_access != "unknown" else None
-    if "note" in body.model_fields_set:
+    if "note" in body.model_fields_set and body.note != before.note:
         values["note"] = body.note
+    if (
+        not values
+    ):  # nothing changes: no new version and no audit noise (a stale version still 409s)
+        if before.row_version != expected_version:
+            raise StaleVersionError("This record changed since you loaded it; reload and try again")
+        return before
     update_versioned(
         session,
         "customs_data_eoris",
@@ -204,8 +223,20 @@ def update_eori(
         object_type=SUBJECT,
         object_id=eori_id,
         occurred_at=now,
-        before={"third_party_access": before.third_party_access},
-        after={"third_party_access": after.third_party_access},
+        # The note is free text, so only the fact that it changed is recorded.
+        before={
+            "third_party_access": before.third_party_access,
+            "access_recorded_on": None
+            if before.access_recorded_on is None
+            else before.access_recorded_on.isoformat(),
+        },
+        after={
+            "third_party_access": after.third_party_access,
+            "access_recorded_on": None
+            if after.access_recorded_on is None
+            else after.access_recorded_on.isoformat(),
+            "note_changed": before.note != after.note,
+        },
     )
     return after
 
@@ -370,17 +401,25 @@ def scan(session: Session, *, tenant_id: UUID, actor: Actor, now: datetime, toda
     gap_tasks = month_tasks = 0
     month_first, month_last = rules.previous_month(today)
     for row in eoris:
-        # ponytail: a client tracked for over 2000 days is only checked over the latest 2000 days.
-        start = max(row.tracking_from, today - timedelta(days=rules.MAX_RANGE_DAYS - 1))
-        built = _calendar(
-            _windows(session, tenant_id, row.eori, "import_item"),
-            tracking_from=row.tracking_from,
-            range_from=start,
-            range_to=today,
-            today=today,
-            lag=lag,
-        )
-        for gap in built.gaps:
+        # Chunks start at the fixed first day to cover, so a gap keeps the same start date (and
+        # the same task key) from one scan to the next however long the client is tracked.
+        windows = _windows(session, tenant_id, row.eori, "import_item")
+        gaps: list[rules.Period] = []
+        chunk_start = row.tracking_from
+        while chunk_start <= today:
+            chunk_end = min(chunk_start + timedelta(days=rules.MAX_RANGE_DAYS - 1), today)
+            gaps.extend(
+                _calendar(
+                    windows,
+                    tracking_from=row.tracking_from,
+                    range_from=chunk_start,
+                    range_to=chunk_end,
+                    today=today,
+                    lag=lag,
+                ).gaps
+            )
+            chunk_start = chunk_end + timedelta(days=1)
+        for gap in gaps:
             key = rules.gap_key(gap.covered_from)
             if _has_task(session, tenant_id, GAP_TASK, row.id, key, open_only=True):
                 continue

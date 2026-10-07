@@ -69,7 +69,7 @@ def scan_customs_data_coverage() -> int:
         tenant_ids = list(
             s.execute(text("select id from cbam.tenants where status = 'active'")).scalars()
         )
-    created = 0
+    created = failed = 0
     for tenant_id in tenant_ids:
 
         def run_scan(session: Session, tenant_id: UUID = tenant_id) -> int:
@@ -82,7 +82,15 @@ def scan_customs_data_coverage() -> int:
             )
             return result.gap_tasks_created + result.month_tasks_created
 
-        created += run_as_tenant(engine, tenant_id, run_scan)
+        try:
+            created += run_as_tenant(engine, tenant_id, run_scan)
+        except Exception as exc:  # one client's failure must not stop the others' scan
+            failed += 1
+            structlog.get_logger().error(
+                "coverage_scan_failed", tenant_id=str(tenant_id), error=type(exc).__name__
+            )
+    if failed:  # every client was tried; now make the failure visible to the worker and Sentry
+        raise RuntimeError(f"customs-data coverage scan failed for {failed} client(s)")
     return created
 
 

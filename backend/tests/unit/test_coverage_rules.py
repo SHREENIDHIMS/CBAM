@@ -155,3 +155,11 @@ def test_cov_14_fetch_due_date_waits_for_the_lag_but_is_never_before_the_first()
     assert rules.fetch_due_date(last, None) == D(2027, 3, 1)
     assert rules.fetch_due_date(last, 0) == D(2027, 3, 1)
     assert rules.gap_key(D(2027, 2, 1)) == "coverage_gap:2027-02-01"
+
+
+def test_cov_15_fetch_due_date_for_other_lags_and_a_lag_of_zero_hides_nothing() -> None:
+    last = D(2027, 2, 28)
+    assert rules.fetch_due_date(last, 1) == D(2027, 3, 1)
+    assert rules.fetch_due_date(last, 3) == D(2027, 3, 3)
+    c = cal([win("a", D(2027, 1, 1), D(2027, 3, 30))], unavailable_latest_days=0)
+    assert states(c)[-1] == (D(2027, 3, 31), D(2027, 3, 31), GAP)
