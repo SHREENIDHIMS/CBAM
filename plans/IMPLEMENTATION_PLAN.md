@@ -188,8 +188,9 @@ clock, money, decisions, tasks.
    *Also built here: the value-correction endpoint (R1-010, `imports:correct`). Both write new
    rows with lineage (a one-row `manual_entry` batch and an immutable source row); neither can
    replace a line a person already settled.*
-8. - [ ] Celery job for large files with progress; replay safety test (same file twice →
+8. - [x] Celery job for large files with progress; replay safety test (same file twice →
    no duplicates).
+   *The Celery job (`process_batch`), progress counters (`rows_processed` of `rows_total` on the batch), crash resume and replay safety are built and tested (IMP-13, IMP-14, IMP-16, IMP-22 in `backend/tests/integration/test_import_processing.py`).*
 8a. - [x] "Get customs data" adapter (R1-054): parse import item, header and tax-lines
    reports; join by declaration; record EORI (GB/XI) and the report's date window.
    *All three report types are parsed by the same job against the layout reference data. Header

@@ -9,6 +9,7 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { label: 'Home', to: '' },
   { label: 'Tasks', to: 'tasks', permission: 'tasks:read' },
+  { label: 'Imports', to: 'imports', permission: 'imports:read' },
 ]
 
 export function visibleNav(permissions: ReadonlySet<string>): NavItem[] {
