@@ -138,7 +138,7 @@ function LineDetail({ tenantId, lineId }: { tenantId: string; lineId: string }) 
               </tr>
             </thead>
             <tbody>
-              {Object.entries(s.raw).map(([key, value]) => (
+              {Object.entries(s.raw ?? {}).map(([key, value]) => (
                 <tr key={key} className="border-t">
                   <th scope="row" className="pr-4 font-normal">
                     {key}

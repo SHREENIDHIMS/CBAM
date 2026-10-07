@@ -2,12 +2,11 @@ import { useState, type FormEvent } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 import { Button } from '@/shared/components/ui/button'
 import { describeError } from '../platform/errors'
-import { NO_FILTERS, readFilters, toParams, validateFilters } from './filters'
+import { NO_FILTERS, readFilters, toParams, validateFilters, type FilterErrors } from './filters'
 import { safeDate } from './format'
 import { useImportLines } from './queries'
+import { Shell } from './Shell'
 import type { LedgerFilters } from './types'
-
-type Errors = Partial<Record<keyof LedgerFilters, string>>
 
 function FilterForm({
   initial,
@@ -15,11 +14,11 @@ function FilterForm({
   onApply,
 }: {
   initial: LedgerFilters
-  urlErrors: Errors
+  urlErrors: FilterErrors
   onApply: (f: LedgerFilters) => void
 }) {
   const [draft, setDraft] = useState(initial)
-  const [submitErrors, setSubmitErrors] = useState<Errors | null>(null)
+  const [submitErrors, setSubmitErrors] = useState<FilterErrors | null>(null)
   const errors = submitErrors ?? urlErrors
   const set = (key: keyof LedgerFilters, value: string) =>
     setDraft({ ...draft, [key]: value } as LedgerFilters)
@@ -31,7 +30,7 @@ function FilterForm({
     if (Object.keys(found).length === 0) onApply(draft)
   }
 
-  const input = 'rounded-md border border-input px-2 py-1'
+  const inputCls = 'rounded-md border border-input px-2 py-1'
   const err = (key: keyof LedgerFilters) =>
     errors[key] ? (
       <span id={`err-${key}`} role="alert" className="block text-sm">
@@ -49,7 +48,7 @@ function FilterForm({
         </label>
         <input
           id="f-code"
-          className={input}
+          className={inputCls}
           inputMode="numeric"
           value={draft.commodity_code}
           onChange={(e) => set('commodity_code', e.target.value.trim())}
@@ -63,9 +62,9 @@ function FilterForm({
         </label>
         <input
           id="f-origin"
-          className={`${input} w-24`}
+          className={`${inputCls} w-24`}
           value={draft.origin}
-          onChange={(e) => set('origin', e.target.value.trim())}
+          onChange={(e) => set('origin', e.target.value.trim().toUpperCase())}
           {...aria('origin')}
         />
         {err('origin')}
@@ -77,7 +76,7 @@ function FilterForm({
         <input
           id="f-from"
           type="date"
-          className={input}
+          className={inputCls}
           value={draft.from}
           onChange={(e) => set('from', e.target.value)}
           {...aria('from')}
@@ -91,7 +90,7 @@ function FilterForm({
         <input
           id="f-to"
           type="date"
-          className={input}
+          className={inputCls}
           value={draft.to}
           onChange={(e) => set('to', e.target.value)}
           {...aria('to')}
@@ -104,7 +103,7 @@ function FilterForm({
         </label>
         <input
           id="f-batch"
-          className={`${input} w-80`}
+          className={`${inputCls} w-80`}
           value={draft.batch_id}
           onChange={(e) => set('batch_id', e.target.value.trim())}
           {...aria('batch_id')}
@@ -117,16 +116,19 @@ function FilterForm({
         </label>
         <select
           id="f-entry"
-          className={input}
+          className={inputCls}
           value={draft.entry_method}
           onChange={(e) => set('entry_method', e.target.value)}
+          {...aria('entry_method')}
         >
           <option value="">All</option>
+          {errors.entry_method && <option value={draft.entry_method}>{draft.entry_method}</option>}
           <option value="cds">cds</option>
           <option value="gcd">gcd</option>
           <option value="manual">manual</option>
           <option value="correction">correction</option>
         </select>
+        {err('entry_method')}
       </div>
       <div>
         <label htmlFor="f-exc" className="block text-sm font-medium">
@@ -134,24 +136,33 @@ function FilterForm({
         </label>
         <select
           id="f-exc"
-          className={input}
+          className={inputCls}
           value={draft.has_open_exceptions}
           onChange={(e) => set('has_open_exceptions', e.target.value)}
+          {...aria('has_open_exceptions')}
         >
           <option value="">Any</option>
+          {errors.has_open_exceptions && (
+            <option value={draft.has_open_exceptions}>{draft.has_open_exceptions}</option>
+          )}
           <option value="true">Has open exceptions</option>
           <option value="false">None</option>
         </select>
+        {err('has_open_exceptions')}
       </div>
       <div className="pt-5">
-        <label className="text-sm font-medium">
-          <input
-            type="checkbox"
-            checked={draft.include_superseded === 'true'}
-            onChange={(e) => set('include_superseded', e.target.checked ? 'true' : '')}
-          />{' '}
+        <input
+          id="f-sup"
+          type="checkbox"
+          className="mr-2"
+          checked={draft.include_superseded === 'true'}
+          onChange={(e) => set('include_superseded', e.target.checked ? 'true' : '')}
+          {...aria('include_superseded')}
+        />
+        <label htmlFor="f-sup" className="text-sm font-medium">
           Include superseded versions
         </label>
+        {err('include_superseded')}
       </div>
       <div className="flex gap-2 pt-5">
         <Button type="submit">Apply filters</Button>
@@ -168,31 +179,30 @@ export function LedgerPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const applied = readFilters(searchParams)
   const urlErrors = validateFilters(applied)
-  const lines = useImportLines(tenantId, toParams(applied))
+  const invalid = Object.keys(urlErrors).length > 0
+  // Nothing is requested while the filters in the URL are invalid.
+  const lines = useImportLines(tenantId, toParams(applied), !invalid)
   const rows = lines.data?.pages.flatMap((p) => p.items) ?? []
-
-  function apply(f: LedgerFilters) {
-    setSearchParams(toParams(f))
-  }
+  const updating = lines.isPlaceholderData
 
   return (
-    <main className="p-6">
-      <p className="mb-2 text-sm">
-        <Link className="underline" to={`/ops/t/${encodeURIComponent(tenantId)}/imports`}>
-          Back to imports
-        </Link>
-      </p>
-      <h1 className="mb-2 text-2xl font-semibold">Import ledger</h1>
+    <Shell tenantId={tenantId} title="Import ledger">
       <p className="mb-4 text-sm">
         Customs lines as reported. Scope, tax point, quarter and threshold columns arrive in Phase
         4; the acceptance date here is the date the report gave, not a tax point.
       </p>
-      <FilterForm key={searchParams.toString()} initial={applied} urlErrors={urlErrors} onApply={apply} />
-      {lines.isPending && <p role="status">Loading…</p>}
-      {lines.isError && <p role="alert">{describeError(lines.error)}</p>}
-      {lines.data && rows.length === 0 && <p>No import lines found.</p>}
-      {rows.length > 0 && (
-        <div className="overflow-x-auto">
+      <FilterForm
+        key={searchParams.toString()}
+        initial={applied}
+        urlErrors={urlErrors}
+        onApply={(f) => setSearchParams(toParams(f))}
+      />
+      {!invalid && lines.isPending && <p role="status">Loading…</p>}
+      {!invalid && updating && <p role="status">Updating results…</p>}
+      {!invalid && lines.isError && <p role="alert">{describeError(lines.error)}</p>}
+      {!invalid && lines.data && rows.length === 0 && !updating && <p>No import lines found.</p>}
+      {!invalid && rows.length > 0 && (
+        <div className="overflow-x-auto" aria-busy={updating} style={{ opacity: updating ? 0.5 : 1 }}>
           <table className="w-full text-left">
             <caption className="sr-only">Import lines</caption>
             <thead>
@@ -245,7 +255,7 @@ export function LedgerPage() {
           </table>
         </div>
       )}
-      {lines.hasNextPage && (
+      {!invalid && !updating && lines.hasNextPage && (
         <Button
           className="mt-4"
           variant="outline"
@@ -255,6 +265,6 @@ export function LedgerPage() {
           Load more
         </Button>
       )}
-    </main>
+    </Shell>
   )
 }

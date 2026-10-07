@@ -144,30 +144,45 @@ function ledger(pages: Record<string, ImportLine[]> = { '': [line()] }) {
 describe('R1-005 import ledger', () => {
   test('shows lines with decimal strings unchanged, a link to the line and a Phase 4 note', async () => {
     const { handler, urls } = ledger({
-      '': [line(), line({ id: 'x', declaration_superseded: true, mrn: 'OLDMRN' })],
+      '': [
+        line(),
+        line({
+          id: 'x',
+          declaration_superseded: true,
+          mrn: 'OLDMRN',
+          net_mass_kg: '0.250000',
+          customs_value_source: '1.00',
+          acceptance_date: '2027-04-02',
+        }),
+      ],
     })
     renderApp('/ops/t/t1/imports/lines', { me: reader, handler })
     const table = await screen.findByRole('table', { name: 'Import lines' })
     expect(urls[0]).toBe('/tenants/t1/import-lines')
-    expect(within(table).getAllByText('1234.500000').length).toBeGreaterThan(0)
-    expect(within(table).getAllByText('9876.50 USD').length).toBeGreaterThan(0)
-    expect(within(table).getByRole('link', { name: '27GB000000000000A1' })).toHaveAttribute(
+    const first = within(table).getByRole('link', { name: '27GB000000000000A1' }).closest('tr')!
+    expect(within(first).getByText('1234.500000')).toBeInTheDocument()
+    expect(within(first).getByText('9876.50 USD')).toBeInTheDocument()
+    expect(within(first).getByText('14 March 2027')).toBeInTheDocument()
+    expect(within(first).queryByText('Superseded declaration')).not.toBeInTheDocument()
+    expect(within(first).getByRole('link', { name: '27GB000000000000A1' })).toHaveAttribute(
       'href',
       `/ops/t/t1/imports/lines/${LINE}`,
     )
-    expect(within(table).getAllByText('14 March 2027').length).toBeGreaterThan(0)
-    expect(within(table).getByText('Superseded declaration')).toBeInTheDocument()
-    expect(within(table).getAllByText('Acceptance date (as reported)').length).toBe(1)
+    const second = within(table).getByRole('link', { name: 'OLDMRN' }).closest('tr')!
+    expect(within(second).getByText('0.250000')).toBeInTheDocument()
+    expect(within(second).getByText('Superseded declaration')).toBeInTheDocument()
+    expect(within(table).getAllByText('Acceptance date (as reported)')).toHaveLength(1)
     expect(screen.getByText(/arrive in Phase 4/)).toBeInTheDocument()
     expect(within(table).queryByText(/tax point/i)).not.toBeInTheDocument()
   })
 
-  test('filters build the query string and the URL', async () => {
+  test('filters build the query string and the URL; origin is upper-cased as you type', async () => {
     const { handler, urls } = ledger()
     renderApp('/ops/t/t1/imports/lines', { me: reader, handler })
     await screen.findByRole('table', { name: 'Import lines' })
     await userEvent.type(screen.getByLabelText('Commodity code starts with'), '7208')
-    await userEvent.type(screen.getByLabelText('Country of origin'), 'CN')
+    await userEvent.type(screen.getByLabelText('Country of origin'), 'cn')
+    expect(screen.getByLabelText('Country of origin')).toHaveValue('CN')
     await userEvent.type(screen.getByLabelText('Acceptance date (as reported) from'), '2027-03-01')
     await userEvent.type(screen.getByLabelText('Acceptance date (as reported) to'), '2027-03-31')
     await userEvent.type(screen.getByLabelText('Import file id'), ID)
@@ -175,18 +190,11 @@ describe('R1-005 import ledger', () => {
     await userEvent.selectOptions(screen.getByLabelText('Open exceptions'), 'true')
     await userEvent.click(screen.getByLabelText('Include superseded versions'))
     await userEvent.click(screen.getByRole('button', { name: 'Apply filters' }))
-    await waitFor(() => expect(urls.length).toBeGreaterThan(1))
-    const params = new URL(urls[urls.length - 1], 'http://x').searchParams
-    expect(Object.fromEntries(params)).toEqual({
-      commodity_code: '7208',
-      origin: 'CN',
-      from: '2027-03-01',
-      to: '2027-03-31',
-      batch_id: ID,
-      entry_method: 'gcd',
-      has_open_exceptions: 'true',
-      include_superseded: 'true',
-    })
+    await waitFor(() =>
+      expect(urls).toContain(
+        `/tenants/t1/import-lines?commodity_code=7208&origin=CN&from=2027-03-01&to=2027-03-31&batch_id=${ID}&entry_method=gcd&has_open_exceptions=true&include_superseded=true`,
+      ),
+    )
   })
 
   test('a bad commodity prefix is blocked with a message and nothing is sent', async () => {
@@ -199,17 +207,88 @@ describe('R1-005 import ledger', () => {
     expect(urls).toHaveLength(1)
   })
 
-  test('filters in the URL are applied; invalid ones are reported and not sent', async () => {
+  test('valid filters in the URL are applied', async () => {
     const { handler, urls } = ledger()
     renderApp('/ops/t/t1/imports/lines?commodity_code=72&origin=cn&include_superseded=true', {
       me: reader,
       handler,
     })
-    expect(await screen.findByRole('alert')).toHaveTextContent('2-letter country code')
     await screen.findByRole('table', { name: 'Import lines' })
-    const params = new URL(urls[0], 'http://x').searchParams
-    expect(Object.fromEntries(params)).toEqual({ commodity_code: '72', include_superseded: 'true' })
+    expect(urls).toEqual(['/tenants/t1/import-lines?commodity_code=72&origin=CN&include_superseded=true'])
     expect(screen.getByLabelText('Commodity code starts with')).toHaveValue('72')
+    expect(screen.getByLabelText('Country of origin')).toHaveValue('CN')
+  })
+
+  test('invalid filters in the URL send no request, show the errors and no table', async () => {
+    const { handler, urls } = ledger()
+    renderApp(
+      '/ops/t/t1/imports/lines?origin=C1&batch_id=bad&entry_method=zip&has_open_exceptions=maybe&include_superseded=yes&from=2027-13-45',
+      { me: reader, handler },
+    )
+    const alerts = await screen.findAllByRole('alert')
+    expect(alerts.map((a) => a.textContent)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('2-letter country code'),
+        expect.stringContaining('must be a UUID'),
+        expect.stringContaining('cds, gcd, manual or correction'),
+        expect.stringContaining('true or false'),
+        expect.stringContaining('real date'),
+      ]),
+    )
+    expect(screen.getByLabelText('Entry method')).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByLabelText('Entry method')).toHaveValue('zip')
+    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+    expect(screen.queryByText('No import lines found.')).not.toBeInTheDocument()
+    expect(urls).toHaveLength(0)
+  })
+
+  test('Clear removes the filters and asks for the unfiltered list', async () => {
+    const { handler, urls } = ledger()
+    renderApp('/ops/t/t1/imports/lines?commodity_code=72', { me: reader, handler })
+    await screen.findByRole('table', { name: 'Import lines' })
+    await userEvent.click(screen.getByRole('button', { name: 'Clear' }))
+    await waitFor(() => expect(urls).toContain('/tenants/t1/import-lines'))
+    expect(screen.getByLabelText('Commodity code starts with')).toHaveValue('')
+  })
+
+  test('changing a filter after Load more asks for the first page again', async () => {
+    const { handler, urls } = ledger({ '': [line()], c2: [line({ id: 'y', mrn: 'SECONDMRN' })] })
+    renderApp('/ops/t/t1/imports/lines', { me: reader, handler })
+    await userEvent.click(await screen.findByRole('button', { name: 'Load more' }))
+    await screen.findByRole('link', { name: 'SECONDMRN' })
+    await userEvent.type(screen.getByLabelText('Country of origin'), 'CN')
+    await userEvent.click(screen.getByRole('button', { name: 'Apply filters' }))
+    await waitFor(() => expect(urls).toContain('/tenants/t1/import-lines?origin=CN'))
+    expect(urls[urls.length - 1]).not.toContain('cursor')
+  })
+
+  test('old rows are marked as updating while new filters load, and Load more is hidden', async () => {
+    let release: (r: Response) => void = () => {}
+    const base = ledger({ '': [line()], c2: [line({ id: 'y' })] })
+    const handler: Handler = (url, init) =>
+      path(url).includes('origin=CN')
+        ? new Promise<Response>((resolve) => (release = resolve))
+        : base.handler(url, init)
+    renderApp('/ops/t/t1/imports/lines', { me: reader, handler })
+    await screen.findByRole('button', { name: 'Load more' })
+    await userEvent.type(screen.getByLabelText('Country of origin'), 'CN')
+    await userEvent.click(screen.getByRole('button', { name: 'Apply filters' }))
+    expect(await screen.findByText('Updating results…')).toBeInTheDocument()
+    expect(screen.getByRole('table', { name: 'Import lines' }).parentElement).toHaveAttribute(
+      'aria-busy',
+      'true',
+    )
+    expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument()
+    release(json({ items: [line({ id: 'z', mrn: 'NEWMRN' })], next_cursor: null }))
+    expect(await screen.findByRole('link', { name: 'NEWMRN' })).toBeInTheDocument()
+    expect(screen.queryByText('Updating results…')).not.toBeInTheDocument()
+  })
+
+  test('an impossible date is blocked with a message', async () => {
+    const { handler, urls } = ledger()
+    renderApp('/ops/t/t1/imports/lines?from=2027-02-30', { me: reader, handler })
+    expect(await screen.findByRole('alert')).toHaveTextContent('real date')
+    expect(urls).toHaveLength(0)
   })
 
   test('superseded versions are marked when included', async () => {
@@ -225,6 +304,15 @@ describe('R1-005 import ledger', () => {
     expect(await screen.findByRole('link', { name: 'SECONDMRN' })).toBeInTheDocument()
     expect(urls.some((u) => u.includes('cursor=c2'))).toBe(true)
     expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument()
+  })
+
+  test('a 404 on the list is shown', async () => {
+    renderApp('/ops/t/t1/imports/lines', {
+      me: reader,
+      handler: (url) =>
+        path(url).startsWith('/tenants/') ? problem(404, 'not-found', 'No such client.') : undefined,
+    })
+    expect(await screen.findByRole('alert')).toHaveTextContent('No such client.')
   })
 
   test('shows an empty message and a 403 error', async () => {
@@ -256,6 +344,19 @@ describe('R1-005 import ledger', () => {
       'href',
       '/ops/t/t1/imports/lines',
     )
+  })
+
+  test('batch detail keeps Imports highlighted, not Import ledger', async () => {
+    renderApp(`/ops/t/t1/imports/${ID}`, {
+      me: reader,
+      handler: (url) =>
+        path(url).startsWith(`/tenants/t1/import-batches/${ID}`)
+          ? json(path(url).includes('/exceptions') ? { items: [], next_cursor: null } : batch())
+          : undefined,
+    })
+    const nav = await screen.findByRole('navigation', { name: 'Main' })
+    expect(within(nav).getByRole('link', { name: 'Imports' })).toHaveAttribute('aria-current', 'page')
+    expect(within(nav).getByRole('link', { name: 'Import ledger' })).not.toHaveAttribute('aria-current')
   })
 
   test('the ledger nav item is hidden without imports:read', async () => {
@@ -307,6 +408,15 @@ describe('R1-005 / R1-010 line detail', () => {
     const { container } = renderApp(route, { me: reader, handler: withDetail() })
     expect(await screen.findByText('<img src=x onerror=alert(1)>')).toBeInTheDocument()
     expect(container.querySelector('img')).toBeNull()
+  })
+
+  test('a source row whose raw cells are null does not break the page', async () => {
+    const d = detail()
+    d.sources[0] = { ...d.sources[0], raw: null }
+    renderApp(route, { me: reader, handler: withDetail(d) })
+    expect(
+      await screen.findByRole('region', { name: 'Source row 7 (primary)' }),
+    ).toBeInTheDocument()
   })
 
   test('a missing line shows the error with the back link; a bad id sends no request', async () => {

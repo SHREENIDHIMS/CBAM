@@ -94,10 +94,15 @@ export function fetchExceptionsCsv(
   )
 }
 
-export function useImportLines(tenantId: string, params: Record<string, string>) {
+export function useImportLines(
+  tenantId: string,
+  params: Record<string, string>,
+  enabled: boolean,
+) {
   const api = useApi()
   return useInfiniteQuery({
     queryKey: ['imports', tenantId, 'lines', params],
+    enabled,
     queryFn: ({ pageParam }) =>
       api.get<Page<ImportLine>>(
         `/tenants/${enc(tenantId)}/import-lines${qs({ ...params, cursor: pageParam })}`,

@@ -141,7 +141,7 @@ export interface SourceRow {
   report_type: string | null
   batch_id: string
   row_number: number
-  raw: Record<string, unknown>
+  raw: Record<string, unknown> | null
   row_sha256: string
 }
 

@@ -45,7 +45,7 @@ export default function App() {
           <Route path="imports" element={<BatchListPage />} />
           <Route path="imports/lines" element={<LedgerPage />} />
           <Route path="imports/lines/:lineId" element={<LineDetailPage />} />
-          <Route path="imports/:batchId"element={<BatchDetailPage />} />
+          <Route path="imports/:batchId" element={<BatchDetailPage />} />
         </Route>
       </Route>
       <Route path="/portal/*" element={<PortalHome />} />
