@@ -1,4 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router'
+import { BatchDetailPage } from './ops/imports/BatchDetailPage'
+import { BatchListPage } from './ops/imports/BatchListPage'
 import { OpsHome } from './ops/OpsHome'
 import { TenantShell } from './ops/TenantShell'
 import { MfaChallenge } from './ops/pages/MfaChallenge'
@@ -38,6 +40,8 @@ export default function App() {
         <Route path="/ops/t/:tenantId" element={<TenantShell />}>
           <Route index element={<TenantHome />} />
           <Route path="tasks" element={<TasksPage />} />
+          <Route path="imports" element={<BatchListPage />} />
+          <Route path="imports/:batchId" element={<BatchDetailPage />} />
         </Route>
       </Route>
       <Route path="/portal/*" element={<PortalHome />} />

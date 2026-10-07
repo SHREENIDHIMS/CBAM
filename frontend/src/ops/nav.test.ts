@@ -11,6 +11,10 @@ describe('role-aware navigation', () => {
     expect(labels(['tasks:read'])).toEqual(['Home', 'Tasks'])
     expect(labels(['imports:read'])).not.toContain('Tasks')
   })
+  test('Imports needs imports:read', () => {
+    expect(labels(['imports:read'])).toEqual(['Home', 'Imports'])
+    expect(labels(['tasks:read'])).not.toContain('Imports')
+  })
   test('links are relative to the tenant', () => {
     const items = visibleNav(new Set(['tasks:read']))
     expect(items.map((i) => i.to)).toEqual(['', 'tasks'])

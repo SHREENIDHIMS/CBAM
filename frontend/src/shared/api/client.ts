@@ -35,6 +35,8 @@ export interface Api {
   patch<T>(path: string, body: unknown, options: { rowVersion: number }): Promise<T>
   post<T>(path: string, body: unknown, options?: { rowVersion: number }): Promise<T>
   delete(path: string): Promise<void>
+  /** GET a non-JSON body (a CSV download) through the same authenticated path. */
+  getText(path: string, accept: string): Promise<string>
 }
 
 async function toApiError(response: Response): Promise<ApiError> {
@@ -69,8 +71,9 @@ export function createApi(
     path: string,
     body?: unknown,
     rowVersion?: number,
+    accept = 'application/json',
   ): Promise<T> {
-    const headers = new Headers({ accept: 'application/json' })
+    const headers = new Headers({ accept })
     const token = await getToken()
     if (token) headers.set('authorization', `Bearer ${token}`)
     if (body !== undefined) headers.set('content-type', 'application/json')
@@ -82,6 +85,7 @@ export function createApi(
     })
     if (!response.ok) throw await toApiError(response)
     if (response.status === 204) return undefined as T
+    if (accept !== 'application/json') return (await response.text()) as T
     return (await response.json()) as T
   }
   return {
@@ -89,5 +93,6 @@ export function createApi(
     patch: (path, body, { rowVersion }) => request('PATCH', path, body, rowVersion),
     post: (path, body, options) => request('POST', path, body, options?.rowVersion),
     delete: (path) => request<void>('DELETE', path),
+    getText: (path, accept) => request<string>('GET', path, undefined, undefined, accept),
   }
 }

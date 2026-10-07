@@ -83,3 +83,23 @@ describe('createApi', () => {
     await expect(createApi(async () => 't', fetchImpl).get('/x')).resolves.toBeUndefined()
   })
 })
+
+describe('createApi.getText', () => {
+  test('sends the token and the accept type, and returns the body as text', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('a,b\r\n1,2\r\n'))
+    const api = createApi(async () => 'tok', fetchImpl)
+    await expect(api.getText('/x?format=csv', 'text/csv')).resolves.toBe('a,b\r\n1,2\r\n')
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('/api/v1/x?format=csv')
+    const headers = new Headers(init.headers)
+    expect(headers.get('authorization')).toBe('Bearer tok')
+    expect(headers.get('accept')).toBe('text/csv')
+  })
+
+  test('a failure is still an ApiError', async () => {
+    const body = JSON.stringify({ type: 'https://x/errors/not-found', title: 'nf' })
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(body, { status: 404 }))
+    const api = createApi(async () => 't', fetchImpl)
+    await expect(api.getText('/x', 'text/csv')).rejects.toBeInstanceOf(ApiError)
+  })
+})
