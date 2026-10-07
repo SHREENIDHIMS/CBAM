@@ -2,11 +2,12 @@ import { useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router'
 import { useApi } from '@/shared/api/ApiContext'
 import { Button } from '@/shared/components/ui/button'
-import { formatDateTime } from '@/shared/lib/format'
 import { describeError } from '../platform/errors'
-import { statusLabel, windowText } from './format'
-import { fetchExceptionsCsv, useBatchExceptions, useImportBatch } from './queries'
+import { safeDateTime, statusLabel, windowText } from './format'
+import { fetchExceptionsCsv, isLive, useBatchExceptions, useImportBatch } from './queries'
 import type { ExceptionFilters } from './types'
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 function Row({ term, children }: { term: string; children: ReactNode }) {
   return (
@@ -17,57 +18,90 @@ function Row({ term, children }: { term: string; children: ReactNode }) {
   )
 }
 
+function Shell({
+  tenantId,
+  title,
+  children,
+}: {
+  tenantId: string
+  title: string
+  children: ReactNode
+}) {
+  return (
+    <main className="p-6">
+      <p className="mb-2 text-sm">
+        <Link className="underline" to={`/ops/t/${tenantId}/imports`}>
+          Back to imports
+        </Link>
+      </p>
+      <h1 className="mb-4 text-2xl font-semibold">{title}</h1>
+      {children}
+    </main>
+  )
+}
+
+/** Checks the id before any request is sent. */
 export function BatchDetailPage() {
   const { tenantId = '', batchId = '' } = useParams()
+  if (!UUID.test(batchId)) {
+    return (
+      <Shell tenantId={tenantId} title="Not found">
+        <p>That import file does not exist.</p>
+      </Shell>
+    )
+  }
+  return <BatchDetail tenantId={tenantId} batchId={batchId} />
+}
+
+function BatchDetail({ tenantId, batchId }: { tenantId: string; batchId: string }) {
   const api = useApi()
   const batch = useImportBatch(tenantId, batchId)
+  const live = batch.data ? isLive(batch.data.status) : false
   const [filters, setFilters] = useState<ExceptionFilters>({ severity: '', status: '' })
-  const exceptions = useBatchExceptions(tenantId, batchId, filters)
+  const exceptions = useBatchExceptions(tenantId, batchId, filters, live)
   const [csvError, setCsvError] = useState<string | null>(null)
+  const [preparing, setPreparing] = useState(false)
   const rows = exceptions.data?.pages.flatMap((p) => p.items) ?? []
 
   async function downloadCsv() {
     setCsvError(null)
+    setPreparing(true)
     try {
       const text = await fetchExceptionsCsv(api, tenantId, batchId, filters)
       const url = URL.createObjectURL(new Blob([text], { type: 'text/csv' }))
       const link = document.createElement('a')
       link.href = url
       link.download = `import-exceptions-${batchId}.csv`
+      document.body.appendChild(link)
       link.click()
-      URL.revokeObjectURL(url)
+      link.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 0)
     } catch (error) {
       setCsvError(describeError(error))
+    } finally {
+      setPreparing(false)
     }
   }
 
   if (batch.isPending)
     return (
-      <p role="status" className="p-6">
-        Loading…
-      </p>
+      <Shell tenantId={tenantId} title="Import file">
+        <p role="status">Loading…</p>
+      </Shell>
     )
   if (batch.isError)
     return (
-      <p role="alert" className="p-6">
-        {describeError(batch.error)}
-      </p>
+      <Shell tenantId={tenantId} title="Import file">
+        <p role="alert">{describeError(batch.error)}</p>
+      </Shell>
     )
   const b = batch.data
 
   return (
-    <main className="p-6">
-      <p className="mb-2 text-sm">
-        <Link className="underline" to="..">
-          Back to imports
-        </Link>
-      </p>
-      <h1 className="mb-4 text-2xl font-semibold">{b.filename ?? 'Unnamed file'}</h1>
+    <Shell tenantId={tenantId} title={b.filename ?? 'Unnamed file'}>
       <h2 className="mb-2 text-lg font-semibold">Details</h2>
       <dl className="mb-6">
-        <Row term="Status">
-          <span role="status">{statusLabel(b.status)}</span>
-        </Row>
+        <Row term="Status">{statusLabel(b.status)}</Row>
         {b.failure_reason && <Row term="Failure reason">{b.failure_reason}</Row>}
         <Row term="Acquisition method">{statusLabel(b.acquisition_method)}</Row>
         <Row term="Report type">{b.cds_report_type ? statusLabel(b.cds_report_type) : '—'}</Row>
@@ -77,7 +111,7 @@ export function BatchDetailPage() {
         <Row term="Acquired on">{windowText(b.acquired_on, null)}</Row>
         <Row term="Layout status">{b.layout_status ? statusLabel(b.layout_status) : '—'}</Row>
         <Row term="File checksum (SHA-256)">{b.file_sha256 ?? '—'}</Row>
-        <Row term="Created">{b.created_at ? formatDateTime(b.created_at) : '—'}</Row>
+        <Row term="Created">{safeDateTime(b.created_at)}</Row>
       </dl>
       <h2 className="mb-2 text-lg font-semibold">Counts</h2>
       <dl className="mb-6">
@@ -127,14 +161,16 @@ export function BatchDetailPage() {
             <option value="waived">waived</option>
           </select>
         </label>
-        <Button variant="outline" size="sm" onClick={() => void downloadCsv()}>
-          Download CSV
+        <Button variant="outline" size="sm" disabled={preparing} onClick={() => void downloadCsv()}>
+          {preparing ? 'Preparing…' : 'Download CSV'}
         </Button>
       </div>
       {csvError && <p role="alert">{csvError}</p>}
       {exceptions.isPending && <p role="status">Loading exceptions…</p>}
       {exceptions.isError && <p role="alert">{describeError(exceptions.error)}</p>}
-      {exceptions.data && rows.length === 0 && <p>No exceptions found.</p>}
+      {exceptions.data && rows.length === 0 && (
+        <p>{live ? 'Still processing. Exceptions may appear here.' : 'No exceptions found.'}</p>
+      )}
       {rows.length > 0 && (
         <table className="w-full text-left">
           <caption className="sr-only">Exceptions</caption>
@@ -152,7 +188,7 @@ export function BatchDetailPage() {
             {rows.map((x) => (
               <tr key={x.id} className="border-t">
                 <td className="py-1">{x.row_number === 0 ? 'Whole file' : x.row_number}</td>
-                <td>{x.field}</td>
+                <td>{x.field || '—'}</td>
                 <td>{x.code}</td>
                 <td>{x.severity}</td>
                 <td>{x.message}</td>
@@ -172,6 +208,6 @@ export function BatchDetailPage() {
           Load more
         </Button>
       )}
-    </main>
+    </Shell>
   )
 }

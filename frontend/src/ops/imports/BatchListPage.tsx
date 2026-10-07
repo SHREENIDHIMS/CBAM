@@ -1,9 +1,8 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { Button } from '@/shared/components/ui/button'
-import { formatDateTime } from '@/shared/lib/format'
 import { describeError } from '../platform/errors'
-import { statusLabel, windowText } from './format'
+import { safeDateTime, statusLabel, windowText } from './format'
 import { useImportBatches } from './queries'
 import { ALL_STATUSES } from './types'
 
@@ -74,7 +73,7 @@ export function BatchListPage() {
                   {b.rows_processed} of {b.rows_total} rows
                 </td>
                 <td>{b.rows_rejected}</td>
-                <td>{b.created_at ? formatDateTime(b.created_at) : '—'}</td>
+                <td>{safeDateTime(b.created_at)}</td>
               </tr>
             ))}
           </tbody>

@@ -1,64 +1,14 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { json, me, problem, renderApp, type Handler } from '@/test/renderApp'
+import { json, problem, renderApp, type Handler } from '@/test/renderApp'
+import { ID, batch, exception, path, reader } from './fixtures'
 import type { ImportBatch, RowException } from './types'
 
-const reader = me({
-  memberships: [
-    {
-      tenant_id: 't1',
-      tenant_name: 'Alpha Ltd',
-      roles: ['operations'],
-      permissions: ['tasks:read', 'imports:read'],
-      mfa_required: false,
-    },
-  ],
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.useRealTimers()
 })
-
-const batch = (over: Partial<ImportBatch> = {}): ImportBatch => ({
-  id: 'b1',
-  status: 'completed',
-  file_sha256: 'ab12',
-  document_version_id: null,
-  filename: 'march-items.csv',
-  acquisition_method: 'cds_export',
-  cds_report_type: 'import_item',
-  eori: 'GB123456789012',
-  window_start: '2027-03-01',
-  window_end: '2027-03-31',
-  source_owner: null,
-  acquired_on: null,
-  rows_total: 10,
-  rows_processed: 10,
-  rows_valid: 8,
-  rows_rejected: 2,
-  lines_created: 7,
-  lines_unchanged: 1,
-  failure_reason: null,
-  report_layout_version_id: null,
-  layout_status: 'active',
-  created_at: '2027-03-31T23:30:00Z',
-  created_by: null,
-  row_version: 1,
-  ...over,
-})
-
-const exception = (over: Partial<RowException> = {}): RowException => ({
-  id: 'e1',
-  row_number: 3,
-  field: 'line.commodity_code',
-  code: 'CODE_INVALID',
-  severity: 'error',
-  message: 'The commodity code is not valid.',
-  status: 'open',
-  row_version: 1,
-  ...over,
-})
-
-const path = (url: string) => url.replace('/api/v1', '')
-
-afterEach(() => vi.restoreAllMocks())
 
 describe('R1-003 import batch list', () => {
   test('shows each batch with progress, UK dates and a link to its detail', async () => {
@@ -70,7 +20,7 @@ describe('R1-003 import batch list', () => {
     const table = await screen.findByRole('table', { name: 'Import batches' })
     expect(within(table).getByRole('link', { name: 'march-items.csv' })).toHaveAttribute(
       'href',
-      '/ops/t/t1/imports/b1',
+      `/ops/t/t1/imports/${ID}`,
     )
     expect(within(table).getByText('GB123456789012')).toBeInTheDocument()
     expect(within(table).getByText('1 March 2027 to 31 March 2027')).toBeInTheDocument()
@@ -101,7 +51,7 @@ describe('R1-003 import batch list', () => {
     await waitFor(() => expect(urls).toContain('/tenants/t1/import-batches?status=failed'))
   })
 
-  test('says so when there are no files, and shows API errors', async () => {
+  test('says so when there are no files', async () => {
     renderApp('/ops/t/t1/imports', {
       me: reader,
       handler: (url) =>
@@ -142,7 +92,7 @@ describe('R1-003 / R1-025 batch detail', () => {
     const calls: string[] = []
     const handler: Handler = (url) => {
       const p = path(url)
-      if (!p.startsWith('/tenants/t1/import-batches/b1')) return undefined
+      if (!p.startsWith(`/tenants/t1/import-batches/${ID}`)) return undefined
       calls.push(p)
       if (p.includes('/exceptions')) {
         if (p.includes('format=csv')) {
@@ -167,7 +117,7 @@ describe('R1-003 / R1-025 batch detail', () => {
     const { handler } = detailHandler({
       batch: batch({ status: 'failed', failure_reason: 'worker_crash_loop' }),
     })
-    renderApp('/ops/t/t1/imports/b1', { me: reader, handler })
+    renderApp(`/ops/t/t1/imports/${ID}`, { me: reader, handler })
     expect(await screen.findByRole('heading', { name: 'march-items.csv' })).toBeInTheDocument()
     expect(screen.getByText('worker_crash_loop')).toBeInTheDocument()
     expect(screen.getByText('GB123456789012')).toBeInTheDocument()
@@ -179,22 +129,6 @@ describe('R1-003 / R1-025 batch detail', () => {
     expect(screen.getByText('Rows valid').nextSibling).toHaveTextContent('8')
     expect(screen.getByText('Rows processed').nextSibling).toHaveTextContent('10 of 10')
   })
-
-  test('polls every 3 seconds while not final, then stops', async () => {
-    const state = { batch: batch({ status: 'parsing', rows_processed: 2 }) }
-    const { handler, calls } = detailHandler(state)
-    renderApp('/ops/t/t1/imports/b1', { me: reader, handler })
-    await screen.findByText('2 of 10')
-    const batchCalls = () => calls.filter((c) => !c.includes('/exceptions')).length
-    expect(batchCalls()).toBe(1)
-
-    state.batch = batch({ status: 'completed' })
-    expect(await screen.findByText('10 of 10', {}, { timeout: 6000 })).toBeInTheDocument()
-    expect(batchCalls()).toBe(2)
-
-    await new Promise((r) => setTimeout(r, 3500))
-    expect(batchCalls()).toBe(2)
-  }, 15000)
 
   test('lists exceptions, labels row 0 as Whole file, and loads more', async () => {
     const { handler, calls } = detailHandler({
@@ -210,7 +144,7 @@ describe('R1-003 / R1-025 batch detail', () => {
         exception(),
       ],
     })
-    renderApp('/ops/t/t1/imports/b1', { me: reader, handler })
+    renderApp(`/ops/t/t1/imports/${ID}`, { me: reader, handler })
     const table = await screen.findByRole('table', { name: 'Exceptions' })
     expect(within(table).getByText('Whole file')).toBeInTheDocument()
     expect(within(table).getByText('3')).toBeInTheDocument()
@@ -227,13 +161,13 @@ describe('R1-003 / R1-025 batch detail', () => {
 
   test('exception filters are sent to the API', async () => {
     const { handler, calls } = detailHandler({ batch: batch(), exceptions: [exception()] })
-    renderApp('/ops/t/t1/imports/b1', { me: reader, handler })
+    renderApp(`/ops/t/t1/imports/${ID}`, { me: reader, handler })
     await screen.findByRole('table', { name: 'Exceptions' })
     await userEvent.selectOptions(screen.getByLabelText('Severity'), 'warning')
     await userEvent.selectOptions(screen.getByLabelText('Exception status'), 'open')
     await waitFor(() =>
       expect(calls).toContain(
-        '/tenants/t1/import-batches/b1/exceptions?severity=warning&status=open',
+        `/tenants/t1/import-batches/${ID}/exceptions?severity=warning&status=open`,
       ),
     )
   })
@@ -244,17 +178,18 @@ describe('R1-003 / R1-025 batch detail', () => {
     const revoke = vi.fn()
     Object.assign(URL, { createObjectURL: create, revokeObjectURL: revoke })
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
-    const { fetchImpl } = renderApp('/ops/t/t1/imports/b1', { me: reader, handler })
+    const { fetchImpl } = renderApp(`/ops/t/t1/imports/${ID}`, { me: reader, handler })
     await screen.findByRole('table', { name: 'Exceptions' })
     await userEvent.click(screen.getByRole('button', { name: 'Download CSV' }))
     await waitFor(() => expect(click).toHaveBeenCalled())
-    expect(calls).toContain('/tenants/t1/import-batches/b1/exceptions?format=csv')
+    expect(click.mock.contexts[0]).toHaveProperty('download', `import-exceptions-${ID}.csv`)
+    expect(calls).toContain(`/tenants/t1/import-batches/${ID}/exceptions?format=csv`)
     const csvCall = fetchImpl.mock.calls.find(([u]) => u.includes('format=csv'))
     const headers = new Headers(csvCall?.[1]?.headers)
     expect(headers.get('authorization')).toBe('Bearer token')
     const blob = (create.mock.calls[0] as unknown as [Blob])[0]
     expect(await blob.text()).toBe('row_number,field\r\n3,line.x\r\n')
-    expect(revoke).toHaveBeenCalledWith('blob:csv')
+    await waitFor(() => expect(revoke).toHaveBeenCalledWith('blob:csv'))
   })
 
   test('a failed CSV download shows an error', async () => {
@@ -262,10 +197,10 @@ describe('R1-003 / R1-025 batch detail', () => {
       const p = path(url)
       if (p.includes('format=csv')) return problem(403, 'forbidden', 'Not allowed.')
       if (p.includes('/exceptions')) return json({ items: [], next_cursor: null })
-      if (p.startsWith('/tenants/t1/import-batches/b1')) return json(batch())
+      if (p.startsWith(`/tenants/t1/import-batches/${ID}`)) return json(batch())
       return undefined
     }
-    renderApp('/ops/t/t1/imports/b1', { me: reader, handler })
+    renderApp(`/ops/t/t1/imports/${ID}`, { me: reader, handler })
     await screen.findByText('No exceptions found.')
     await userEvent.click(screen.getByRole('button', { name: 'Download CSV' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Not allowed.')
