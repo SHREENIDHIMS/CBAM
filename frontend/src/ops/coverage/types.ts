@@ -3,9 +3,6 @@ export type ThirdPartyAccess = 'unknown' | 'requested' | 'granted' | 'revoked'
 export type ReportType = 'import_item' | 'import_header' | 'import_tax_lines' | 'export_item'
 export type PeriodState = 'loaded' | 'loaded_with_errors' | 'gap' | 'not_yet_available'
 
-/** The server's EORI format (a GB or XI EORI: two letters and twelve digits). */
-export const EORI_PATTERN = /^(GB|XI)[0-9]{12}$/
-
 export const ACCESS_VALUES: readonly ThirdPartyAccess[] = [
   'unknown',
   'requested',

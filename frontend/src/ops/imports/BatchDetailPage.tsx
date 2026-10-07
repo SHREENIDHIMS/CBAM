@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { useApi } from '@/shared/api/ApiContext'
 import { Button } from '@/shared/components/ui/button'
-import { EORI_PATTERN } from '../coverage/types'
+import { EORI_PATTERN } from '@/shared/lib/validate'
 import { describeError } from '../platform/errors'
 import { safeDateTime, statusLabel, windowText } from './format'
 import { Row, Shell, UUID } from './Shell'
@@ -78,7 +78,7 @@ function BatchDetail({ tenantId, batchId }: { tenantId: string; batchId: string 
           {b.eori && EORI_PATTERN.test(b.eori) ? (
             <Link
               className="underline"
-              to={`/ops/t/${encodeURIComponent(tenantId)}/customs-data/${b.eori}`}
+              to={`/ops/t/${encodeURIComponent(tenantId)}/customs-data/${encodeURIComponent(b.eori)}`}
             >
               {b.eori}
             </Link>

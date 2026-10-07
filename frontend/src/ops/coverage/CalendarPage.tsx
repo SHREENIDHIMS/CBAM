@@ -1,11 +1,11 @@
 import { Link, useParams, useSearchParams } from 'react-router'
 import { ApiError } from '@/shared/api/client'
-import { isRealDate } from '../imports/filters'
+import { EORI_PATTERN, isRealDate } from '@/shared/lib/validate'
 import { safeDate, statusLabel } from '../imports/format'
 import { Row, Shell } from '../imports/Shell'
 import { describeError } from '../platform/errors'
 import { useCalendar } from './queries'
-import { EORI_PATTERN, REPORT_TYPES, type PeriodState, type ReportType } from './types'
+import { REPORT_TYPES, type PeriodState, type ReportType } from './types'
 
 const BACK = { to: 'customs-data', label: 'Back to customs data coverage' }
 
@@ -32,6 +32,8 @@ export function CalendarPage() {
   if (!reportType) problems.push('Unknown report type.')
   if (from && !isRealDate(from)) problems.push('The from date is not a real date.')
   if (to && !isRealDate(to)) problems.push('The to date is not a real date.')
+  if (from && to && isRealDate(from) && isRealDate(to) && from > to)
+    problems.push('The from date cannot be after the to date.')
   const valid = problems.length === 0
   const calendar = useCalendar(
     tenantId,
@@ -120,7 +122,7 @@ export function CalendarPage() {
           <dl className="mb-6">
             <Row term="Complete">{c.complete ? 'Yes' : 'No'}</Row>
             <Row term="Registered">{c.registered ? 'Yes' : 'No'}</Row>
-            <Row term="Third-party access">{c.third_party_access}</Row>
+            <Row term="Third-party access">{statusLabel(c.third_party_access)}</Row>
             <Row term="First day to cover">{safeDate(c.tracking_from)}</Row>
             <Row term="Showing">
               {safeDate(c.range_from)} to {safeDate(c.range_to)}
@@ -205,7 +207,7 @@ export function CalendarPage() {
               </thead>
               <tbody>
                 {c.overlaps.map((o) => (
-                  <tr key={o.covered_from} className="border-t">
+                  <tr key={`${o.covered_from}-${o.covered_to}-${o.batch_ids.join()}`} className="border-t">
                     <td className="py-1 pr-4">{safeDate(o.covered_from)}</td>
                     <td className="pr-4">{safeDate(o.covered_to)}</td>
                     <td>

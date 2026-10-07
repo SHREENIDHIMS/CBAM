@@ -1,13 +1,14 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useOutletContext, useParams } from 'react-router'
+import { ApiError } from '@/shared/api/client'
 import type { Membership } from '@/shared/api/types'
 import { Button } from '@/shared/components/ui/button'
-import { isRealDate } from '../imports/filters'
+import { EORI_PATTERN, isRealDate } from '@/shared/lib/validate'
 import { safeDate, statusLabel } from '../imports/format'
 import { Shell } from '../imports/Shell'
 import { describeError } from '../platform/errors'
 import { useEoris, useRegisterEori, useScan, useUpdateEori } from './queries'
-import { ACCESS_VALUES, EORI_PATTERN, NOTE_MAX, type Eori, type ThirdPartyAccess } from './types'
+import { ACCESS_VALUES, NOTE_MAX, type Eori, type ThirdPartyAccess } from './types'
 
 const inputCls = 'rounded-md border border-input px-2 py-1'
 const HOME = { to: '', label: 'Back to home' }
@@ -55,6 +56,7 @@ function RegisterForm({ tenantId }: { tenantId: string }) {
 
   async function submit(event: FormEvent) {
     event.preventDefault()
+    if (register.isPending) return
     const found: Record<string, string> = {}
     if (!EORI_PATTERN.test(eori)) found.eori = 'EORI must be GB or XI followed by 12 digits.'
     if (!isRealDate(from)) found.from = 'Enter the first day to cover as a real date.'
@@ -142,14 +144,16 @@ function EditForm({ tenantId, row, onClose }: { tenantId: string; row: Eori; onC
   const update = useUpdateEori(tenantId, row)
   const [access, setAccess] = useState(row.third_party_access)
   const [note, setNote] = useState(row.note ?? '')
-  const [error, setError] = useState<string | null>(null)
+  const [noteError, setNoteError] = useState<string | null>(null)
+  const stale = update.error instanceof ApiError && update.error.slug === 'stale-version'
   const changedAccess = access !== row.third_party_access
   const changedNote = note.trim() !== (row.note ?? '')
 
   async function save(event: FormEvent) {
     event.preventDefault()
-    if (note.length > NOTE_MAX) return setError(`Note can be at most ${NOTE_MAX} characters.`)
-    setError(null)
+    if (update.isPending) return
+    if (note.length > NOTE_MAX) return setNoteError(`Note can be at most ${NOTE_MAX} characters.`)
+    setNoteError(null)
     try {
       await update.mutateAsync({
         ...(changedAccess ? { third_party_access: access } : {}),
@@ -163,7 +167,13 @@ function EditForm({ tenantId, row, onClose }: { tenantId: string; row: Eori; onC
 
   return (
     <form onSubmit={save} aria-label={`Edit ${row.eori}`} className="my-2 max-w-xl rounded border p-3">
-      {(error || update.isError) && <p role="alert">{error ?? describeError(update.error)}</p>}
+      {update.isError && (
+        <p role="alert">
+          {stale
+            ? 'Changed by someone else; showing the latest values. Your change was not saved.'
+            : describeError(update.error)}
+        </p>
+      )}
       <p className="mb-2 text-sm">
         First day to cover ({safeDate(row.tracking_from)}) cannot be changed.
       </p>
@@ -182,7 +192,9 @@ function EditForm({ tenantId, row, onClose }: { tenantId: string; row: Eori; onC
           className={`${inputCls} w-full`}
           value={note}
           onChange={(e) => setNote(e.target.value)}
+          {...(noteError ? { 'aria-invalid': true, 'aria-describedby': `err-e-note-${row.id}` } : {})}
         />
+        <FieldError id={`err-e-note-${row.id}`} message={noteError ?? undefined} />
       </div>
       <div className="flex gap-2">
         <Button type="submit" size="sm" disabled={update.isPending || !(changedAccess || changedNote)}>
@@ -282,7 +294,7 @@ export function EoriRegisterPage() {
         (r) =>
           editing === r.id && (
             <EditForm
-              key={`${r.id}-${r.row_version}`}
+              key={r.id}
               tenantId={tenantId}
               row={r}
               onClose={() => setEditing(null)}

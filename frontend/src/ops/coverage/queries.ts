@@ -44,10 +44,8 @@ export function useUpdateEori(tenantId: string, row: Eori) {
 
 export function useScan(tenantId: string) {
   const api = useApi()
-  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: () => api.post<ScanResult>(`${base(tenantId)}/coverage/scan`, {}),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks'] }),
   })
 }
 

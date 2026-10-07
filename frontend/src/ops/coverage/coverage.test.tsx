@@ -176,7 +176,7 @@ describe('R1-054 EORI register', () => {
   })
 
   test('editing sends only changed fields with If-Match and says the first day cannot change', async () => {
-    const { handler, calls } = register()
+    const { handler } = register()
     const wrapped: Handler = (url, init) =>
       init?.method === 'PATCH' ? json(eoriRow({ row_version: 5 })) : handler(url, init)
     const spy = vi.fn(wrapped)
@@ -191,23 +191,67 @@ describe('R1-054 EORI register', () => {
     expect(patch[0]).toBe('/api/v1/tenants/t1/customs-data/eoris/r1')
     expect(JSON.parse(String(patch[1]?.body))).toEqual({ third_party_access: 'granted' })
     expect(new Headers(patch[1]?.headers).get('if-match')).toBe('"4"')
-    expect(calls.length).toBeGreaterThan(0)
   })
 
-  test('a stale edit (409) tells the user to reload and reloads the register', async () => {
-    const { handler, calls } = register()
-    const wrapped: Handler = (url, init) =>
-      init?.method === 'PATCH' ? problem(409, 'stale-version') : handler(url, init)
+  test('a stale edit (409) keeps the notice and the typed note after the register reloads', async () => {
+    const { handler } = register()
+    let stale = false
+    const wrapped: Handler = (url, init) => {
+      if (init?.method === 'PATCH') {
+        stale = true
+        return problem(409, 'stale-version')
+      }
+      // After the failed save the register holds a newer row version.
+      if (stale && path(url).endsWith('/eoris')) return json([eoriRow({ row_version: 5 })])
+      return handler(url, init)
+    }
     renderApp('/ops/t/t1/customs-data', { me: writer, handler: wrapped })
     await userEvent.click(await screen.findByRole('button', { name: `Edit access / note for ${E}` }))
     await userEvent.type(screen.getByLabelText(`Note for ${E}`), ' more')
     await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('Reload the page')
-    await waitFor(() => expect(calls.filter((c) => c.method === 'GET').length).toBeGreaterThan(1))
+    // The register reloads with row version 5 ...
+    const table = await screen.findByRole('table', { name: 'Registered EORIs' })
+    await waitFor(() => expect(within(table).getByText('5')).toBeInTheDocument())
+    // ... and the notice and the user's input are still there.
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Changed by someone else; showing the latest values. Your change was not saved.',
+    )
+    expect(screen.getByLabelText(`Note for ${E}`)).toHaveValue('Ask the agent <b>first</b> more')
+  })
+
+  test('a long note in the edit form is flagged for assistive technology', async () => {
+    renderApp('/ops/t/t1/customs-data', { me: writer, handler: register().handler })
+    await userEvent.click(await screen.findByRole('button', { name: `Edit access / note for ${E}` }))
+    await userEvent.click(screen.getByLabelText(`Note for ${E}`))
+    await userEvent.paste('x'.repeat(501))
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('at most 500 characters')
+    expect(screen.getByLabelText(`Note for ${E}`)).toHaveAttribute('aria-invalid', 'true')
+  })
+
+  test('a double click on Register EORI sends one request', async () => {
+    const { handler } = register()
+    let posts = 0
+    let release: (r: Response) => void = () => {}
+    const wrapped: Handler = (url, init) => {
+      if (init?.method === 'POST' && path(url).endsWith('/eoris')) {
+        posts += 1
+        return new Promise<Response>((resolve) => (release = resolve))
+      }
+      return handler(url, init)
+    }
+    renderApp('/ops/t/t1/customs-data', { me: writer, handler: wrapped })
+    await screen.findByRole('table', { name: 'Registered EORIs' })
+    await userEvent.type(screen.getByLabelText('EORI'), E)
+    await userEvent.type(screen.getByLabelText('First day to cover'), '2027-01-01')
+    await userEvent.dblClick(screen.getByRole('button', { name: 'Register EORI' }))
+    expect(posts).toBe(1)
+    release(json(eoriRow(), 201))
+    await waitFor(() => expect(screen.getByLabelText('EORI')).toHaveValue(''))
   })
 
   test('Check for gaps now shows the counts', async () => {
-    const { handler, calls } = register()
+    const { handler } = register()
     const wrapped: Handler = (url, init) =>
       init?.method === 'POST' && path(url).endsWith('/coverage/scan')
         ? json({ eoris_scanned: 2, gap_tasks_created: 3, month_tasks_created: 1 })
@@ -217,7 +261,6 @@ describe('R1-054 EORI register', () => {
     expect(await screen.findByRole('status')).toHaveTextContent(
       'Checked 2 EORI(s). New gap tasks: 3. New monthly tasks: 1.',
     )
-    expect(calls.length).toBeGreaterThan(0)
   })
 
   test('an empty register and a 403 are shown', async () => {
@@ -280,20 +323,41 @@ describe('R1-054 coverage calendar', () => {
     expect(await screen.findByText('5 days')).toBeInTheDocument()
   })
 
-  test('switching report type and range requests again, with Loading in between', async () => {
+  test('switching report type shows Loading, not the old calendar, then the new one', async () => {
+    let release: (r: Response) => void = () => {}
+    const { handler, urls } = cal()
+    const wrapped: Handler = (url, init) =>
+      path(url).includes('report_type=import_header')
+        ? new Promise<Response>((resolve) => {
+            urls.push(path(url))
+            release = resolve
+          })
+        : handler(url, init)
+    renderApp(route, { me: reader, handler: wrapped })
+    await screen.findByRole('table', { name: 'Coverage periods' })
+    await userEvent.selectOptions(screen.getByLabelText('Report type'), 'import_header')
+    expect(await screen.findByRole('status')).toHaveTextContent('Loading')
+    expect(screen.queryByRole('table', { name: 'Coverage periods' })).not.toBeInTheDocument()
+    expect(urls).toContain(`/tenants/t1/customs-data/coverage?eori=${E}&report_type=import_header`)
+    release(json(calendar({ report_type: 'import_header', periods: [] })))
+    expect(await screen.findByText('No periods in this range.')).toBeInTheDocument()
+  })
+
+  test('a from date is sent as the range start', async () => {
     const { handler, urls } = cal()
     renderApp(route, { me: reader, handler })
     await screen.findByRole('table', { name: 'Coverage periods' })
-    await userEvent.selectOptions(screen.getByLabelText('Report type'), 'import_header')
-    await waitFor(() =>
-      expect(urls).toContain(`/tenants/t1/customs-data/coverage?eori=${E}&report_type=import_header`),
-    )
     await userEvent.type(screen.getByLabelText('From (optional)'), '2027-02-01')
     await waitFor(() =>
-      expect(urls).toContain(
-        `/tenants/t1/customs-data/coverage?eori=${E}&report_type=import_header&from=2027-02-01`,
-      ),
+      expect(urls).toContain(`/tenants/t1/customs-data/coverage?eori=${E}&report_type=import_item&from=2027-02-01`),
     )
+  })
+
+  test('from after to is blocked on the page and sends no request', async () => {
+    const { handler, urls } = cal()
+    renderApp(`${route}?from=2027-03-01&to=2027-02-01`, { me: reader, handler })
+    expect(await screen.findByRole('alert')).toHaveTextContent('from date cannot be after the to date')
+    expect(urls).toHaveLength(0)
   })
 
   test('404 shows the not-registered state; 422 shows the server message', async () => {
@@ -338,5 +402,26 @@ describe('R1-054 coverage calendar', () => {
       'href',
       '/ops/t/t1/customs-data/GB123456789012',
     )
+  })
+})
+
+describe('tenant switching', () => {
+  test('page state does not carry from one client to another', async () => {
+    const both = me({
+      memberships: ['t1', 't2'].map((id) => ({
+        tenant_id: id,
+        tenant_name: `Client ${id}`,
+        roles: ['operations'],
+        permissions: ['tasks:read', 'imports:read'],
+        mfa_required: false,
+      })),
+    })
+    const { renderShellWithChild } = await import('@/test/shellHarness')
+    renderShellWithChild(both)
+    await userEvent.type(await screen.findByLabelText('Draft'), 'hello')
+    expect(screen.getByLabelText('Draft')).toHaveValue('hello')
+    await userEvent.click(screen.getByRole('link', { name: 'Go to t2' }))
+    await screen.findByText('Client t2')
+    expect(screen.getByLabelText('Draft')).toHaveValue('')
   })
 })
