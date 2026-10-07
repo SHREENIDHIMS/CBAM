@@ -1,9 +1,9 @@
-import { NavLink, Outlet, useNavigate, useParams } from 'react-router'
+import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/shared/components/ui/button'
 import { useMe } from '@/shared/api/queries'
 import { useAuth } from '@/shared/auth/AuthContext'
-import { visibleNav } from './nav'
+import { isNavActive, visibleNav } from './nav'
 
 /** App shell for one client account: header, role-aware navigation, sign-out. */
 export function TenantShell() {
@@ -12,6 +12,7 @@ export function TenantShell() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const me = useMe()
+  const { pathname } = useLocation()
 
   if (me.isPending)
     return (
@@ -65,13 +66,19 @@ export function TenantShell() {
           <ul className="space-y-1">
             {nav.map((item) => (
               <li key={item.label}>
-                <NavLink
+                <Link
                   to={item.to === '' ? '.' : item.to}
-                  end={item.to === ''}
-                  className={({ isActive }) => (isActive ? 'font-semibold underline' : '')}
+                  aria-current={
+                    isNavActive(item, pathname, `/ops/t/${tenantId}`) ? 'page' : undefined
+                  }
+                  className={
+                    isNavActive(item, pathname, `/ops/t/${tenantId}`)
+                      ? 'font-semibold underline'
+                      : ''
+                  }
                 >
                   {item.label}
-                </NavLink>
+                </Link>
               </li>
             ))}
           </ul>
