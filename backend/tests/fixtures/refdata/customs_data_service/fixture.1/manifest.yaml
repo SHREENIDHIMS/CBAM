@@ -1,0 +1,12 @@
+dataset: customs_data_service
+version: "fixture.1"
+source_id: FIXTURE-TEST-SOURCE
+source_title: Test fixture source (not law)
+source_type: guidance
+retrieved_at: 2026-10-03
+source_status: laid
+fixture: true
+effective_from: 2027-01-01
+effective_to: null
+checksum_sha256: 7b0ea42e9a5a66097389a4f91e3c22bc526bdac00a851f3c4da013ba72a92d7a
+notes: "Fixture only (test data). The real value comes from HMRC's Get customs data guidance (GOV-DEC-021 decides whether guidance may activate it)."

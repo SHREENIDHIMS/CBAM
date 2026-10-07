@@ -12,6 +12,7 @@ from app.core.logging import (
     start_request_scope,
 )
 from app.core.observability import init_sentry
+from app.modules.coverage.api import router as coverage_router
 from app.modules.identity.api import router as identity_router
 from app.modules.imports.api import router as imports_router
 from app.modules.imports.impact import register as register_import_impact
@@ -45,6 +46,7 @@ def create_app() -> FastAPI:
     app.include_router(identity_router, prefix="/api/v1")
     app.include_router(tasks_router, prefix="/api/v1")
     app.include_router(imports_router, prefix="/api/v1")
+    app.include_router(coverage_router, prefix="/api/v1")
     app.include_router(manual_router, prefix="/api/v1")
     app.include_router(ledger_router, prefix="/api/v1")
     app.include_router(liability_router, prefix="/api/v1")

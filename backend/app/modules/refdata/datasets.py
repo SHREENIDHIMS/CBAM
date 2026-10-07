@@ -151,6 +151,11 @@ _SPECS: tuple[DatasetSpec, ...] = (
         key=("rule_key",),
     ),
     DatasetSpec(
+        "customs_data_service",
+        (_c("rule_key"), _c("value_int", "int"), _c("description")),
+        key=("rule_key",),
+    ),
+    DatasetSpec(
         "compliance_calendar",
         (_c("period"), _c("return_due", "date"), _c("payment_due", "date")),
         key=("period",),
