@@ -4,12 +4,14 @@ export interface NavItem {
   label: string
   to: string // relative to /ops/t/:tenantId
   permission?: string
+  end?: boolean // only active on an exact match
 }
 
 export const NAV_ITEMS: NavItem[] = [
   { label: 'Home', to: '' },
   { label: 'Tasks', to: 'tasks', permission: 'tasks:read' },
-  { label: 'Imports', to: 'imports', permission: 'imports:read' },
+  { label: 'Imports', to: 'imports', permission: 'imports:read', end: true },
+  { label: 'Import ledger', to: 'imports/lines', permission: 'imports:read' },
 ]
 
 export function visibleNav(permissions: ReadonlySet<string>): NavItem[] {

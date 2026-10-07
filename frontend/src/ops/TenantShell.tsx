@@ -67,7 +67,7 @@ export function TenantShell() {
               <li key={item.label}>
                 <NavLink
                   to={item.to === '' ? '.' : item.to}
-                  end={item.to === ''}
+                  end={item.to === '' || item.end}
                   className={({ isActive }) => (isActive ? 'font-semibold underline' : '')}
                 >
                   {item.label}

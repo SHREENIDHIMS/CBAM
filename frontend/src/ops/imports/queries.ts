@@ -5,6 +5,8 @@ import {
   FINAL_STATUSES,
   type ExceptionFilters,
   type ImportBatch,
+  type ImportLine,
+  type ImportLineDetail,
   type Page,
   type RowException,
 } from './types'
@@ -17,7 +19,7 @@ const enc = encodeURIComponent
 const LIVE: readonly string[] = ALL_STATUSES.filter((s) => !FINAL_STATUSES.includes(s))
 export const isLive = (status: string): boolean => LIVE.includes(status)
 
-function qs(params: Record<string, string | undefined>): string {
+export function qs(params: Record<string, string | undefined>): string {
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) if (value) search.set(key, value)
   const text = search.toString()
@@ -90,4 +92,27 @@ export function fetchExceptionsCsv(
     `/tenants/${enc(tenantId)}/import-batches/${enc(batchId)}/exceptions${qs({ ...filters, format: 'csv' })}`,
     'text/csv',
   )
+}
+
+export function useImportLines(tenantId: string, params: Record<string, string>) {
+  const api = useApi()
+  return useInfiniteQuery({
+    queryKey: ['imports', tenantId, 'lines', params],
+    queryFn: ({ pageParam }) =>
+      api.get<Page<ImportLine>>(
+        `/tenants/${enc(tenantId)}/import-lines${qs({ ...params, cursor: pageParam })}`,
+      ),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
+    placeholderData: keepPreviousData,
+  })
+}
+
+export function useImportLine(tenantId: string, lineId: string) {
+  const api = useApi()
+  return useQuery({
+    queryKey: ['imports', tenantId, 'line', lineId],
+    queryFn: () =>
+      api.get<ImportLineDetail>(`/tenants/${enc(tenantId)}/import-lines/${enc(lineId)}`),
+  })
 }

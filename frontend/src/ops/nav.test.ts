@@ -12,7 +12,7 @@ describe('role-aware navigation', () => {
     expect(labels(['imports:read'])).not.toContain('Tasks')
   })
   test('Imports needs imports:read', () => {
-    expect(labels(['imports:read'])).toEqual(['Home', 'Imports'])
+    expect(labels(['imports:read'])).toEqual(['Home', 'Imports', 'Import ledger'])
     expect(labels(['tasks:read'])).not.toContain('Imports')
   })
   test('links are relative to the tenant', () => {
