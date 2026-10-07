@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { useParams } from 'react-router'
+import { Link, useParams } from 'react-router'
 import { useApi } from '@/shared/api/ApiContext'
 import { Button } from '@/shared/components/ui/button'
+import { EORI_PATTERN } from '../coverage/types'
 import { describeError } from '../platform/errors'
 import { safeDateTime, statusLabel, windowText } from './format'
 import { Row, Shell, UUID } from './Shell'
@@ -73,7 +74,18 @@ function BatchDetail({ tenantId, batchId }: { tenantId: string; batchId: string 
         {b.failure_reason && <Row term="Failure reason">{b.failure_reason}</Row>}
         <Row term="Acquisition method">{statusLabel(b.acquisition_method)}</Row>
         <Row term="Report type">{b.cds_report_type ? statusLabel(b.cds_report_type) : '—'}</Row>
-        <Row term="EORI">{b.eori ?? '—'}</Row>
+        <Row term="EORI">
+          {b.eori && EORI_PATTERN.test(b.eori) ? (
+            <Link
+              className="underline"
+              to={`/ops/t/${encodeURIComponent(tenantId)}/customs-data/${b.eori}`}
+            >
+              {b.eori}
+            </Link>
+          ) : (
+            (b.eori ?? '—')
+          )}
+        </Row>
         <Row term="Window">{windowText(b.window_start, b.window_end)}</Row>
         <Row term="Source owner">{b.source_owner ?? '—'}</Row>
         <Row term="Acquired on">{windowText(b.acquired_on, null)}</Row>
