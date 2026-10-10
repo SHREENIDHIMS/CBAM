@@ -447,3 +447,24 @@ describe('R1-005 / R1-010 line detail', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Not allowed.')
   })
 })
+
+describe('tenant switching', () => {
+  test('page state does not carry from one client to another', async () => {
+    const both = me({
+      memberships: ['t1', 't2'].map((id) => ({
+        tenant_id: id,
+        tenant_name: `Client ${id}`,
+        roles: ['operations'],
+        permissions: ['tasks:read', 'imports:read'],
+        mfa_required: false,
+      })),
+    })
+    const { renderShellWithChild } = await import('@/test/shellHarness')
+    renderShellWithChild(both)
+    await userEvent.type(await screen.findByLabelText('Draft'), 'hello')
+    expect(screen.getByLabelText('Draft')).toHaveValue('hello')
+    await userEvent.click(screen.getByRole('link', { name: 'Go to t2' }))
+    await screen.findByText('Client t2')
+    expect(screen.getByLabelText('Draft')).toHaveValue('')
+  })
+})
