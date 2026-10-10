@@ -12,7 +12,7 @@ describe('role-aware navigation', () => {
     expect(labels(['imports:read'])).not.toContain('Tasks')
   })
   test('Imports needs imports:read', () => {
-    expect(labels(['imports:read'])).toEqual(['Home', 'Imports', 'Import ledger'])
+    expect(labels(['imports:read'])).toEqual(['Home', 'Imports', 'Import ledger', 'Customs data coverage'])
     expect(labels(['tasks:read'])).not.toContain('Imports')
   })
   test('links are relative to the tenant', () => {
@@ -31,5 +31,6 @@ describe('active item', () => {
     expect(active('/imports/abc')).toEqual(['Imports'])
     expect(active('/imports/lines')).toEqual(['Import ledger'])
     expect(active('/imports/lines/abc')).toEqual(['Import ledger'])
+    expect(active('/customs-data/GB123456789012')).toEqual(['Customs data coverage'])
   })
 })

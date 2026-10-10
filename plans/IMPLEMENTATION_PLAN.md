@@ -208,9 +208,10 @@ clock, money, decisions, tasks.
    is decided, so until then no day is hidden (more gap warnings, never fewer). The 72-hour report
    delay is not modelled yet. The monthly task is created by the first daily scan on or after the
    1st, once per EORI per month.*
-9. - [ ] UI: import batch list/detail, exception report (view + CSV), import ledger with
+9. - [x] UI: import batch list/detail, exception report (view + CSV), import ledger with
    filters, line detail showing source row. The CSV export must escape leading `= + - @` in
    every cell that came from an uploaded file (docs/SECURITY.md files checklist).
+   *Built in three slices: batch list/detail and exception report with CSV (#14), import ledger and line detail (#15), and the EORI register and coverage calendar (#16). Correction and manual-entry screens are not part of this step.*
 
 **Exit gate**
 - [ ] **500-row CDS file imports cleanly with errors reported per row** (handbook gate) — *proven on the provisional synthetic layout by IMP-10/IMP-45 (463 lines and 37 exceptions); tick when re-run on a real masked HMRC report (DATA-DEC-002)*

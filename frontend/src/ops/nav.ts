@@ -12,6 +12,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Tasks', to: 'tasks', permission: 'tasks:read' },
   { label: 'Imports', to: 'imports', permission: 'imports:read', except: 'imports/lines' },
   { label: 'Import ledger', to: 'imports/lines', permission: 'imports:read' },
+  { label: 'Customs data coverage', to: 'customs-data', permission: 'imports:read' },
 ]
 
 export function visibleNav(permissions: ReadonlySet<string>): NavItem[] {

@@ -1,6 +1,8 @@
 import { Navigate, Route, Routes } from 'react-router'
 import { BatchDetailPage } from './ops/imports/BatchDetailPage'
 import { BatchListPage } from './ops/imports/BatchListPage'
+import { CalendarPage } from './ops/coverage/CalendarPage'
+import { EoriRegisterPage } from './ops/coverage/EoriRegisterPage'
 import { LedgerPage } from './ops/imports/LedgerPage'
 import { LineDetailPage } from './ops/imports/LineDetailPage'
 import { OpsHome } from './ops/OpsHome'
@@ -42,6 +44,8 @@ export default function App() {
         <Route path="/ops/t/:tenantId" element={<TenantShell />}>
           <Route index element={<TenantHome />} />
           <Route path="tasks" element={<TasksPage />} />
+          <Route path="customs-data" element={<EoriRegisterPage />} />
+          <Route path="customs-data/:eori" element={<CalendarPage />} />
           <Route path="imports" element={<BatchListPage />} />
           <Route path="imports/lines" element={<LedgerPage />} />
           <Route path="imports/lines/:lineId" element={<LineDetailPage />} />
