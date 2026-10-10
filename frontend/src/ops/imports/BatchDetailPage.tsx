@@ -1,44 +1,12 @@
-import { useState, type ReactNode } from 'react'
-import { Link, useParams } from 'react-router'
+import { useState } from 'react'
+import { useParams } from 'react-router'
 import { useApi } from '@/shared/api/ApiContext'
 import { Button } from '@/shared/components/ui/button'
 import { describeError } from '../platform/errors'
 import { safeDateTime, statusLabel, windowText } from './format'
+import { Row, Shell, UUID } from './Shell'
 import { fetchExceptionsCsv, isLive, useBatchExceptions, useImportBatch } from './queries'
 import type { ExceptionFilters } from './types'
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-function Row({ term, children }: { term: string; children: ReactNode }) {
-  return (
-    <div className="flex gap-2 py-0.5">
-      <dt className="w-48 font-medium">{term}</dt>
-      <dd>{children}</dd>
-    </div>
-  )
-}
-
-function Shell({
-  tenantId,
-  title,
-  children,
-}: {
-  tenantId: string
-  title: string
-  children: ReactNode
-}) {
-  return (
-    <main className="p-6">
-      <p className="mb-2 text-sm">
-        <Link className="underline" to={`/ops/t/${tenantId}/imports`}>
-          Back to imports
-        </Link>
-      </p>
-      <h1 className="mb-4 text-2xl font-semibold">{title}</h1>
-      {children}
-    </main>
-  )
-}
 
 /** Checks the id before any request is sent. */
 export function BatchDetailPage() {

@@ -15,6 +15,12 @@ export function BatchListPage() {
   return (
     <main className="p-6">
       <h1 className="mb-4 text-2xl font-semibold">Imports</h1>
+      <p className="mb-4">
+        <Link className="underline" to="lines">
+          Open the import ledger
+        </Link>{' '}
+        to see the normalised customs lines.
+      </p>
       <div className="mb-4">
         <label htmlFor="status-filter" className="mr-2 text-sm font-medium">
           Status
