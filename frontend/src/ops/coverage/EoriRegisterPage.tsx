@@ -145,14 +145,25 @@ function EditForm({ tenantId, row, onClose }: { tenantId: string; row: Eori; onC
   const [access, setAccess] = useState(row.third_party_access)
   const [note, setNote] = useState(row.note ?? '')
   const [noteError, setNoteError] = useState<string | null>(null)
+  const [baseVersion, setBaseVersion] = useState(row.row_version)
+  const [lostNote, setLostNote] = useState<string | null>(null)
   const stale = update.error instanceof ApiError && update.error.slug === 'stale-version'
   const changedAccess = access !== row.third_party_access
   const changedNote = note.trim() !== (row.note ?? '')
 
+  // Someone else saved a newer version: show it in the form, so a second Save can only send
+  // what the user has seen (If-Match stays meaningful). Keep the unsaved note visible.
+  if (row.row_version !== baseVersion) {
+    setBaseVersion(row.row_version)
+    setLostNote(changedNote ? note : null)
+    setAccess(row.third_party_access)
+    setNote(row.note ?? '')
+  }
+
   async function save(event: FormEvent) {
     event.preventDefault()
     if (update.isPending) return
-    if (note.length > NOTE_MAX) return setNoteError(`Note can be at most ${NOTE_MAX} characters.`)
+    if (note.trim().length > NOTE_MAX) return setNoteError(`Note can be at most ${NOTE_MAX} characters.`)
     setNoteError(null)
     try {
       await update.mutateAsync({
@@ -172,6 +183,7 @@ function EditForm({ tenantId, row, onClose }: { tenantId: string; row: Eori; onC
           {stale
             ? 'Changed by someone else; showing the latest values. Your change was not saved.'
             : describeError(update.error)}
+          {stale && lostNote !== null && <> Your unsaved note: {lostNote}</>}
         </p>
       )}
       <p className="mb-2 text-sm">

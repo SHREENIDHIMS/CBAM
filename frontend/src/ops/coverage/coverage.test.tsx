@@ -193,7 +193,7 @@ describe('R1-054 EORI register', () => {
     expect(new Headers(patch[1]?.headers).get('if-match')).toBe('"4"')
   })
 
-  test('a stale edit (409) keeps the notice and the typed note after the register reloads', async () => {
+  test('a stale edit (409) reloads the latest values into the form and shows the unsaved note', async () => {
     const { handler } = register()
     let stale = false
     const wrapped: Handler = (url, init) => {
@@ -202,7 +202,8 @@ describe('R1-054 EORI register', () => {
         return problem(409, 'stale-version')
       }
       // After the failed save the register holds a newer row version.
-      if (stale && path(url).endsWith('/eoris')) return json([eoriRow({ row_version: 5 })])
+      if (stale && path(url).endsWith('/eoris'))
+        return json([eoriRow({ row_version: 5, note: 'Changed by B' })])
       return handler(url, init)
     }
     renderApp('/ops/t/t1/customs-data', { me: writer, handler: wrapped })
@@ -212,11 +213,15 @@ describe('R1-054 EORI register', () => {
     // The register reloads with row version 5 ...
     const table = await screen.findByRole('table', { name: 'Registered EORIs' })
     await waitFor(() => expect(within(table).getByText('5')).toBeInTheDocument())
-    // ... and the notice and the user's input are still there.
-    expect(screen.getByRole('alert')).toHaveTextContent(
+    // ... the form now holds the latest saved values, so a second Save cannot overwrite
+    // the other user's change unseen, and the unsaved text is still shown to the user.
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent(
       'Changed by someone else; showing the latest values. Your change was not saved.',
     )
-    expect(screen.getByLabelText(`Note for ${E}`)).toHaveValue('Ask the agent <b>first</b> more')
+    expect(alert).toHaveTextContent('Your unsaved note: Ask the agent <b>first</b> more')
+    expect(screen.getByLabelText(`Note for ${E}`)).toHaveValue('Changed by B')
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled()
   })
 
   test('a long note in the edit form is flagged for assistive technology', async () => {
