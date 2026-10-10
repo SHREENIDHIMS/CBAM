@@ -84,7 +84,7 @@ export function TenantShell() {
           </ul>
         </nav>
         <div className="flex-1">
-          <Outlet context={{ membership }} />
+          <Outlet key={tenantId} context={{ membership }} />
         </div>
       </div>
     </div>
