@@ -156,9 +156,10 @@ clock, money, decisions, tasks.
 1. - [ ] Freeze the column mapping from real (masked) HMRC "Get customs data" reports
    (DATA-DEC-002); if not yet available, from HMRC's published report descriptions +
    synthetic files, marked provisional. Mapping lives in `ref_cds_report_layouts`.
-   *Note: a provisional SYNTHETIC layout (invented `SYNTH_*` column names) exists only as a
-   test fixture (`backend/tests/fixtures/refdata/cds_report_layouts`). Nothing is in
-   `backend/refdata/`; the real mapping needs a masked HMRC report before the pilot.*
+   *Note: fixtures now include both the original invented `SYNTH_*` layout and a provisional
+   layout plus synthetic CSVs derived from HMRC's official blank example headers. The official
+   examples contain no data rows, so date/currency formats still need a masked report before
+   this step or the pilot gate can be ticked. Nothing is in `backend/refdata/`.*
 2. - [x] `import_batches` + upload endpoint: store original file in Storage, SHA-256
    idempotency, acquisition method (R1-003).
 3. - [x] `source_rows` (raw, immutable) + row validation → `row_exceptions` (missing/invalid

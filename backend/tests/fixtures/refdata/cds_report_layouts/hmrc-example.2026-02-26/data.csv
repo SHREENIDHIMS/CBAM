@@ -1,0 +1,17 @@
+report_type,column_name,maps_to,required,date_format
+import_item,Entry Identifier,declaration.mrn,true,
+import_item,Acceptance Date,declaration.acceptance_date,true,%d/%m/%Y
+import_item,Importer EORI,declaration.eori,true,
+import_item,Declarant EORI,declaration.declarant_eori,false,
+import_item,Item Number,line.item_no,true,
+import_item,Commodity Code,line.commodity_code,true,
+import_item,Net Mass,line.net_mass_kg,true,
+import_item,Customs Value,line.customs_value,true,
+import_item,Invoice Currency,line.customs_value_currency,true,
+import_item,Country of Origin,line.origin_country,true,
+import_item,Valuation Method,line.valuation_basis,false,
+import_item,CPC,line.cpc,false,
+import_item,Goods Description,line.description,false,
+import_header,Entry Identifier,declaration.mrn,true,
+import_tax_lines,Entry Identifier,declaration.mrn,true,
+import_tax_lines,Item Number,line.item_no,false,
