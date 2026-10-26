@@ -1,5 +1,9 @@
 # Changelog
 
+- R1-054 / DATA-DEC-002: added synthetic item, header and tax-line CSV fixtures derived from
+  HMRC's official blank Get customs data example headers, with pinned source hashes and an
+  explicitly provisional sample-only layout. A masked real export is still required.
+
 All notable changes to this project. Newest first. Format based on
 [Keep a Changelog](https://keepachangelog.com/). Every entry names the requirement
 IDs it touches. Releases are tagged `r1-pilot`, `r1-live`, `r2.0`, `r3.0`.
