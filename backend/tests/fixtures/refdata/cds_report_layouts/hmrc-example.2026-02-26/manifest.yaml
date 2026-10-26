@@ -1,0 +1,14 @@
+dataset: cds_report_layouts
+version: "hmrc-example.2026-02-26"
+source_id: HMRC-GCD-EXAMPLES-2026-02-26
+source_title: HMRC Get customs data example reports
+source_type: guidance
+source_url: https://www.gov.uk/guidance/get-customs-data-for-import-and-export-declarations
+publication_date: 2026-02-26
+retrieved_at: 2026-10-26
+source_status: draft
+fixture: true
+effective_from: 2026-02-26
+effective_to: null
+checksum_sha256: 6f1966cbb9032d2ff2c33d2489acac1fb97949d6c06c8c2d598ffb411ead3d4a
+notes: "FIXTURE ONLY. Official headers with synthetic values. Date and currency mapping remain provisional pending a masked real report (DATA-DEC-002)."

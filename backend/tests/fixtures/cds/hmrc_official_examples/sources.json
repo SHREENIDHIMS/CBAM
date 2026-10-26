@@ -1,0 +1,17 @@
+{
+  "header": {
+    "filename": "header.ods",
+    "sha256": "1d4860904f6928b7b60acfa3f7326e7ce6d2bf2487eebb14a0bd8f54c0c579cf",
+    "url": "https://assets.publishing.service.gov.uk/media/6abd0b4a55bc01d752a7f15a/Example_imports_header_report.ods"
+  },
+  "item": {
+    "filename": "item.ods",
+    "sha256": "9b7bb64bee2ed12a51ec73a761b56f81b2efcb4283e99283b99475b5d4a3efef",
+    "url": "https://assets.publishing.service.gov.uk/media/6abd0b8f26660e5f62a7f169/Example_imports_item_report.ods"
+  },
+  "tax_lines": {
+    "filename": "tax_lines.ods",
+    "sha256": "84bbe12c3fde426a1d26ff86d7696219cfed91125d9558ee368617f5d699ceba",
+    "url": "https://assets.publishing.service.gov.uk/media/6abd0ad3f04a15f5337227c1/Example_imports_tax_lines_report.ods"
+  }
+}
