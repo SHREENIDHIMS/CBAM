@@ -59,6 +59,13 @@ npm ci
 npm run dev                                        # UI   http://localhost:5173
 ```
 
+To view the synthetic HMRC report without local Supabase or the API, run
+`cd frontend && npm ci && npm run dev` and open
+`http://localhost:5173/demo/hmrc`. This development-only preview reads the
+synthetic CSV fixtures in `backend/tests/fixtures/cds/hmrc_official_examples/`;
+it does not create an import batch. The signed-in application still requires the
+services above.
+
 ## Checks
 
 ```bash

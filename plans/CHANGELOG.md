@@ -1,5 +1,8 @@
 # Changelog
 
+- R1-054: added a development-only browser preview of the synthetic HMRC item, header and
+  tax-lines CSV fixtures. It shows source rows and all official columns without local services;
+  it does not create a real import batch or make a compliance decision.
 - R1-054 / DATA-DEC-002: added synthetic item, header and tax-line CSV fixtures derived from
   HMRC's official blank Get customs data example headers, with pinned source hashes and an
   explicitly provisional sample-only layout. A masked real export is still required.
