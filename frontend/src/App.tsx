@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { Navigate, Route, Routes } from 'react-router'
 import { BatchDetailPage } from './ops/imports/BatchDetailPage'
 import { BatchListPage } from './ops/imports/BatchListPage'
@@ -23,9 +24,27 @@ import { RefDataShell } from './ops/refdata/RefDataShell'
 import { ReferenceDataPage } from './ops/refdata/ReferenceDataPage'
 import { RequireAuth } from './shared/auth/RequireAuth'
 
+const DevHmrcSamplePreview = import.meta.env.DEV
+  ? lazy(() =>
+      import('./ops/demo/HmrcSamplePreview').then((module) => ({
+        default: module.HmrcSamplePreview,
+      })),
+    )
+  : null
+
 export default function App() {
   return (
     <Routes>
+      {DevHmrcSamplePreview && (
+        <Route
+          path="/demo/hmrc"
+          element={
+            <Suspense fallback={<p role="status">Loading sample…</p>}>
+              <DevHmrcSamplePreview />
+            </Suspense>
+          }
+        />
+      )}
       <Route path="/signin" element={<SignIn />} />
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/reset-password/update" element={<UpdatePassword />} />
