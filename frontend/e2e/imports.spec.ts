@@ -6,6 +6,94 @@ import { expect, test, type BrowserContext } from '@playwright/test'
 const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url')
 const TENANT = '11111111-1111-4111-8111-111111111111'
 const BATCH = '22222222-2222-4222-8222-222222222222'
+const LINE = '33333333-3333-4333-8333-333333333333'
+
+const line = {
+  id: LINE,
+  declaration_id: 'd1',
+  mrn: '27GB000000000000A1',
+  current_declaration_id: 'd1',
+  declaration_superseded: true,
+  acceptance_date: '2027-01-14',
+  item_no: 1,
+  version: 2,
+  supersedes_id: null,
+  is_current: true,
+  commodity_code: '7208100000',
+  description: 'Hot rolled coil',
+  net_mass_kg: '1234.500000',
+  customs_value_source: '9876.50',
+  customs_value_currency: 'USD',
+  customs_value_gbp: null,
+  customs_value_gbp_note: null,
+  valuation_basis: null,
+  value_source: 'file',
+  value_override_reason: null,
+  country_of_origin_declared: 'CN',
+  cpc: '4000',
+  batch_id: BATCH,
+  source_row_id: 's1',
+  entry_method: 'cds',
+  change_reason: 'source_changed',
+  created_at: '2027-02-02T09:00:00Z',
+  open_exceptions: 1,
+}
+const lineDetail = {
+  line,
+  declaration: {
+    id: 'd1',
+    mrn: line.mrn,
+    version: 1,
+    supersedes_id: null,
+    is_current: true,
+    acceptance_date: '2027-01-14',
+    acceptance_at: null,
+    procedure_code: '4000',
+    additional_procedure_codes: null,
+    importer: { id: 'p1', eori: 'GB123456789012', name: 'Importer Ltd' },
+    declarant: null,
+    representative: null,
+    representation_type: 'direct',
+    eori_context: 'GB',
+    entry_method: 'cds',
+    batch_id: BATCH,
+    created_at: null,
+  },
+  sources: [
+    {
+      source_row_id: 's1',
+      role: 'primary',
+      report_type: 'import_item',
+      batch_id: BATCH,
+      row_number: 3,
+      raw: { 'Commodity Code': '7208100000', Note: '<b>not bold</b>' },
+      row_sha256: 'b'.repeat(64),
+    },
+  ],
+  batch: {
+    id: BATCH,
+    status: 'completed',
+    acquisition_method: 'get_customs_data',
+    cds_report_type: 'import_item',
+    eori_context: 'GB',
+    acquired_on: null,
+    window_start: null,
+    window_end: null,
+  },
+  file: { document_version_id: null, filename: 'january.csv', sha256: 'a'.repeat(64), size_bytes: 1024 },
+  versions: [
+    {
+      id: LINE,
+      version: 2,
+      supersedes_id: null,
+      is_current: true,
+      change_reason: 'source_changed',
+      batch_id: BATCH,
+      created_at: '2027-02-02T09:00:00Z',
+    },
+  ],
+  open_exceptions: [],
+}
 
 const batch = {
   id: BATCH,
@@ -112,6 +200,8 @@ async function signIn(context: BrowserContext) {
         next_cursor: null,
       })
     }
+    if (url.includes(`/import-lines/${LINE}`)) return json(lineDetail)
+    if (url.includes('/import-lines')) return json({ items: [line], next_cursor: null })
     if (url.includes(`/import-batches/${BATCH}`)) return json(batch)
     if (url.includes('/import-batches')) return json({ items: [batch], next_cursor: null })
     return route.fulfill({ status: 404, contentType: 'application/json', body: '{}' })
@@ -133,6 +223,41 @@ for (const [name, path] of [
     expect(violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')).toEqual([])
   })
 }
+
+for (const [name, path, text] of [
+  ['import ledger', `/ops/t/${TENANT}/imports/lines`, '27GB000000000000A1'],
+  ['line detail', `/ops/t/${TENANT}/imports/lines/${LINE}`, '<b>not bold</b>'],
+] as const) {
+  test(`${name}: renders decimal strings as given and has no serious axe violations`, async ({
+    page,
+    context,
+  }) => {
+    await signIn(context)
+    await page.goto(path)
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+    await expect(page.getByText(text).first()).toBeVisible()
+    await expect(page.getByText('1234.500000').first()).toBeVisible()
+    const { violations } = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag22aa'])
+      .analyze()
+    expect(violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')).toEqual([])
+  })
+}
+
+test('import ledger: a bad commodity prefix shows a message and passes axe', async ({
+  page,
+  context,
+}) => {
+  await signIn(context)
+  await page.goto(`/ops/t/${TENANT}/imports/lines`)
+  await page.getByLabel('Commodity code starts with').fill('72ab')
+  await page.getByRole('button', { name: 'Apply filters' }).click()
+  await expect(page.getByRole('alert')).toContainText('1 to 10 digits')
+  const { violations } = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag22aa'])
+    .analyze()
+  expect(violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')).toEqual([])
+})
 
 test('batch detail: exceptions show "Whole file" and the CSV downloads unchanged', async ({
   page,
