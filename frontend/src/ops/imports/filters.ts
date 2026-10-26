@@ -1,3 +1,4 @@
+import { isRealDate } from '@/shared/lib/validate'
 import { UUID } from './Shell'
 import type { LedgerFilters } from './types'
 
@@ -14,13 +15,6 @@ export const NO_FILTERS: LedgerFilters = {
 
 const KEYS = Object.keys(NO_FILTERS) as (keyof LedgerFilters)[]
 const ENTRY = ['cds', 'gcd', 'manual', 'correction']
-
-/** A real calendar date in YYYY-MM-DD form (2027-13-45 is not). */
-function isRealDate(value: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
-  const parsed = new Date(`${value}T00:00:00Z`)
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
-}
 
 export function readFilters(params: URLSearchParams): LedgerFilters {
   const out: Record<string, string> = { ...NO_FILTERS }
