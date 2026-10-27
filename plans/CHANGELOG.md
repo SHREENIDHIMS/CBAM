@@ -1,5 +1,14 @@
 # Changelog
 
+- R1 baseline reconciliation: added `docs/R1_IMPLEMENTATION_MATRIX.md`, mapping every
+  R1 Pilot and R1 Live requirement (including the brought-forward R2-031) to actual
+  frontend, backend, schema and test evidence. The baseline records R1 Pilot and R1
+  Live as not ready, keeps real HMRC-report and regulatory approvals open, and calls
+  out the missing `backend/tests/security/` gate rather than treating skipped database
+  tests as a pass.
+- Accessibility gate: increased the authenticated workspace label contrast and verified
+  the imports/coverage Playwright + axe journeys. This is a cross-cutting accessibility
+  correction and does not complete R1-041 (supplier magic-link lifecycle).
 - R1-054: added a development-only browser preview of the synthetic HMRC item, header and
   tax-lines CSV fixtures. It shows source rows and all official columns without local services;
   it does not create a real import batch or make a compliance decision.
