@@ -2,9 +2,18 @@ import type { ReactNode } from 'react'
 
 export function AuthCard({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <main className="mx-auto max-w-md p-6">
-      <h1 className="mb-4 text-2xl font-semibold">{title}</h1>
-      {children}
+    <main className="auth-page">
+      <div className="auth-brand-panel">
+        <div className="brand-mark">C</div>
+        <p className="eyebrow">CBAM CONTROL ROOM</p>
+        <h2>Evidence you can defend.</h2>
+        <p>Track customs data, reference sources and coverage decisions in one controlled workspace.</p>
+      </div>
+      <section className="auth-card" aria-labelledby="auth-title">
+        <p className="eyebrow text-emerald-700">SECURE ACCESS</p>
+        <h1 id="auth-title">{title}</h1>
+        {children}
+      </section>
     </main>
   )
 }
@@ -32,7 +41,7 @@ export function Field(props: {
         autoComplete={props.autoComplete}
         inputMode={props.inputMode}
         onChange={(e) => props.onChange(e.target.value)}
-        className="w-full rounded-md border border-input px-3 py-2"
+        className="app-input"
       />
     </div>
   )

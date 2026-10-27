@@ -44,25 +44,30 @@ export function TenantShell() {
   }
 
   return (
-    <div>
-      <header className="flex items-center justify-between border-b px-6 py-3">
-        <div>
-          <strong>{membership.tenant_name}</strong>
+    <div className="min-h-screen bg-[#f4f7f3]">
+      <header className="flex items-center justify-between border-b border-[#dbe5dc] bg-white px-6 py-4 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="brand-mark">C</div>
+          <div>
+            <p className="eyebrow text-emerald-700">CBAM CONTROL ROOM</p>
+            <strong className="text-lg text-[#173b2b]">{membership.tenant_name}</strong>
+          </div>
           {me.data.memberships.length > 1 && (
             <NavLink to="/ops" className="ml-3 text-sm underline">
               Switch client
             </NavLink>
           )}
         </div>
-        <div className="flex items-center gap-3 text-sm">
-          <span>{auth.user?.email}</span>
+        <div className="flex items-center gap-3 text-sm text-slate-600">
+          <span className="hidden sm:inline">{auth.user?.email}</span>
           <Button variant="outline" size="sm" onClick={signOut}>
             Sign out
           </Button>
         </div>
       </header>
-      <div className="flex">
-        <nav aria-label="Main" className="w-48 border-r p-4">
+      <div className="mx-auto flex max-w-[1600px]">
+        <nav aria-label="Main" className="hidden w-60 shrink-0 border-r border-[#dbe5dc] bg-white p-5 md:block">
+          <p className="mb-3 px-3 text-xs font-bold uppercase tracking-[.14em] text-slate-400">Workspace</p>
           <ul className="space-y-1">
             {nav.map((item) => (
               <li key={item.label}>
@@ -73,8 +78,8 @@ export function TenantShell() {
                   }
                   className={
                     isNavActive(item, pathname, `/ops/t/${tenantId}`)
-                      ? 'font-semibold underline'
-                      : ''
+                      ? 'rounded-lg bg-[#e9f3d7] px-3 py-2 font-semibold text-[#173b2b]'
+                      : 'rounded-lg px-3 py-2 text-slate-600 hover:bg-slate-50'
                   }
                 >
                   {item.label}
