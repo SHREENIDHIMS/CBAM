@@ -1,6 +1,7 @@
 import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { AuthContext, type AuthApi } from './AuthContext'
+import { idleTimeoutMs, startIdleSession } from './idleSession'
 
 /** Supabase Auth only (CLAUDE.md rule 18): the frontend never reads business tables here. */
 function makeClient(): SupabaseClient | null {
@@ -47,6 +48,21 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
       data.subscription.unsubscribe()
     }
   }, [])
+
+  const signedInUserId = session?.user.id
+  useEffect(() => {
+    if (!signedInUserId || !supabase) return
+    return startIdleSession({
+      timeoutMs: idleTimeoutMs(import.meta.env.VITE_AUTH_IDLE_MINUTES),
+      onIdle: async () => {
+        // Remove access to protected routes immediately. The local sign-out also clears
+        // the persisted refresh token, so a reload cannot silently restore an idle session.
+        setSession(null)
+        setAal(null)
+        await supabase.auth.signOut({ scope: 'local' })
+      },
+    })
+  }, [signedInUserId])
 
   const value = useMemo<AuthApi>(
     () => ({
