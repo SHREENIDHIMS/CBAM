@@ -57,7 +57,7 @@ exists. The repository currently has no `backend/tests/security/` directory, des
 | R1-039 | Delegated evidence source | None | Missing | Not started | Missing | None | Evidence source party model absent | Add separately from supplier/importer identity | Attribution/RLS tests | Not complete |
 | R1-040 | Registration service readiness switch | `ref_service_state` table/loader only | Missing | Not started lookup/workflow | Reference table only | Refdata tests | No effective-dated admin control or UI behavior | Implement authorised config/history and messaging | Date-change E2E | Not complete |
 | R1-041 | Supplier magic-link lifecycle | None | Missing | Not started | Missing | None | Issue/hash/expiry/revoke/resend/scope absent | Implement high-entropy protected-token lifecycle | Expiry/replay/cross-case tests | Not complete |
-| R1-042 | Authentication, MFA and sessions | Supabase auth UI; JWT/JWKS/aal/recent-auth enforcement | Partial | Partial | Membership enforcement verified | Auth/permission/UI tests and local login smoke | Inactivity logout and copied login/MFA audit events are absent; hosted settings not release-verified | Add idle-session handling and auditable auth-event ingestion | Real local Supabase and direct API tests | Partial |
+| R1-042 | Authentication, MFA and sessions | Supabase auth UI; JWT/JWKS/aal/recent-auth enforcement; configurable browser idle sign-out | Partial | Partial | Membership enforcement verified | Auth/permission/UI/idle-timer tests and local login smoke | Copied login/MFA audit events are absent; hosted settings not release-verified | Add auditable auth-event ingestion | Real local Supabase and direct API tests | Partial |
 | R1-043 | UK legal-date semantics | `core/dates.py`, clock abstraction | Indirectly used | Verified core | Correct date/timestamptz conventions in current schema | BST/GMT/leap/quarter tests | Unbuilt domains still need the same contract | Enforce in every new rule and migration | Frozen-clock domain scenarios | Verified core; future coverage required |
 | R1-044 | Numeric precision contract | `core/money.py`, NUMERIC columns, float-ban CI | Decimal strings rendered | Verified current domains | Verified current schema | Property/round-trip/float-ban tests | Threshold/emissions/FX domains not built | Preserve contract in new modules | CI float ban plus boundary properties | Verified core; future coverage required |
 | R1-045 | Concurrency control | `row_version`, `If-Match`, locks on current reviewable records | Partial | Verified primitive | Verified current tables | Concurrent/stale update tests | Unbuilt review/approval records cannot be verified | Apply mixin/locks to every new mutable workflow | Two-writer tests per record type | Partial |
@@ -79,12 +79,17 @@ exists. The repository currently has no `backend/tests/security/` directory, des
 
 - Backend static gates: Ruff check, Ruff format check and mypy passed on 27 October 2026.
 - Backend without database: 387 passed, 423 skipped. This is not a release result.
-- Migration suite on isolated local `cbam_test`: 9 passed. The full database-backed
-  suite was started separately and must be recorded when it reaches a terminal result.
+- Backend on isolated local `cbam_test`: 799 passed, 11 skipped in 724.13 seconds;
+  the focused migration suite also passed 9/9. The remaining skip reasons require
+  release-evidence review; they are not silently counted as passes.
 - Frontend lint and typecheck passed; 12 Vitest files / 137 tests passed serially;
   production build passed.
 - Targeted imports and coverage Playwright/axe run: 9 passed after the sidebar
   contrast correction. PR #21 has green backend, frontend and secret-scan jobs.
+- Full local Playwright run: 16 passed and one coverage-register assertion timed out
+  under four workers; the complete coverage file then passed 3/3 with one worker.
+  PR #21's frontend CI (including the full Playwright command) passed. Treat the local
+  parallel timeout as a reliability item until it is reproduced or eliminated.
 - A documentation/CI mismatch is open: `docs/TESTING.md` requires
   `backend/tests/security/`, but that directory is absent and the checked-in CI runs
   only unit, scenario and integration folders.
