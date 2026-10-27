@@ -67,7 +67,7 @@ export function TenantShell() {
       </header>
       <div className="mx-auto flex max-w-[1600px]">
         <nav aria-label="Main" className="hidden w-60 shrink-0 border-r border-[#dbe5dc] bg-white p-5 md:block">
-          <p className="mb-3 px-3 text-xs font-bold uppercase tracking-[.14em] text-slate-400">Workspace</p>
+          <p className="mb-3 px-3 text-xs font-bold uppercase tracking-[.14em] text-slate-600">Workspace</p>
           <ul className="space-y-1">
             {nav.map((item) => (
               <li key={item.label}>
