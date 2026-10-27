@@ -1,5 +1,11 @@
 # Changelog
 
+- R1-042: added a configurable signed-in browser inactivity guard (30-minute default,
+  invalid configuration fails back to that default). Keyboard, pointer, touch, scroll
+  and focus activity restart the timer; expiry immediately removes protected UI access
+  and clears the local Supabase session. Timer, activity and cleanup regression tests
+  were added. Supabase login/MFA event ingestion into the business audit trail remains
+  open, so R1-042 is still partial.
 - R1 baseline reconciliation: added `docs/R1_IMPLEMENTATION_MATRIX.md`, mapping every
   R1 Pilot and R1 Live requirement (including the brought-forward R2-031) to actual
   frontend, backend, schema and test evidence. The baseline records R1 Pilot and R1
